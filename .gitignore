@@ -1,0 +1,12 @@
+.DS_Store
+node_modules/
+*.log
+android/.gradle/
+android/build/
+android/app/build/
+.idea/
+*.iml
+local.properties
+# Generated from source-parts by npm run prepare
+website/index.html
+android/app/src/main/assets/index.html

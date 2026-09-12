@@ -1,0 +1,14 @@
+{
+  "name": "tronpay-monorepo",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "prepare": "node scripts/prepare-assets.mjs",
+    "start": "node scripts/prepare-assets.mjs && node website/server.mjs",
+    "serve": "node scripts/prepare-assets.mjs && node website/server.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
