@@ -1,10 +1,12 @@
-name: Build Android APK
+name: Build digiRupee Android APK
 
 on:
   push:
     branches: [ main ]
     paths:
       - 'android/**'
+      - 'ui/app-final-br-parts/**'
+      - 'scripts/prepare-assets.mjs'
       - '.github/workflows/android-apk.yml'
   workflow_dispatch:
 
@@ -22,8 +24,15 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Rebuild approved HTML assets
+      - name: Rebuild approved Android HTML asset
         run: node scripts/prepare-assets.mjs
+
+      - name: Verify digiRupee branding and UI asset
+        run: |
+          test -s android/app/src/main/assets/index.html
+          test -s android/app/src/main/res/drawable-nodpi/digirupee_logo.webp
+          grep -q 'digiRupee' android/app/src/main/res/values/strings.xml
+          grep -q 'digirupee_logo' android/app/src/main/AndroidManifest.xml
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -46,15 +55,21 @@ jobs:
         working-directory: android
         run: gradle --no-daemon assembleDebug
 
-      - name: Build release APK
+      - name: Build unsigned release APK
         working-directory: android
         run: gradle --no-daemon assembleRelease
 
-      - name: Upload APK artifacts
+      - name: Prepare named APK files
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/debug/app-debug.apk dist/digiRupee-debug.apk
+          cp android/app/build/outputs/apk/release/app-release-unsigned.apk dist/digiRupee-release-unsigned.apk
+          test -s dist/digiRupee-debug.apk
+          test -s dist/digiRupee-release-unsigned.apk
+
+      - name: Upload digiRupee APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tronpay-apks
-          path: |
-            android/app/build/outputs/apk/debug/app-debug.apk
-            android/app/build/outputs/apk/release/app-release-unsigned.apk
+          name: digiRupee-apks
+          path: dist/*.apk
           if-no-files-found: error
