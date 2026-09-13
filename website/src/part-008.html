@@ -1,0 +1,65 @@
+<div class="legal-card"><h3>Refund Policy</h3><p>Rules for unfulfilled payments, duplicate transfers, unmatched payments and orders after USDT has already been sent.</p><button class="btn secondary" onclick="openLegal('refund')">Read Refund Policy</button></div>
+</div>
+</div></section>
+</main>
+<!-- DASHBOARD -->
+<section id="dashboard">
+<div class="dash-layout">
+<aside class="sidebar">
+<div class="side-brand"><img alt="LOKTRON" class="loktron-side-logo" src="assets/loktron-logo.webp"/></div>
+<nav class="side-nav"><a class="side-link active" data-page="overview" onclick="showDashPage('overview',this)"><span class="sicon"><svg viewbox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19.5z"></path><path d="M9 21v-6h6v6"></path></svg></span>Overview</a><a class="side-link" data-page="buy" onclick="showDashPage('buy',this)">Buy USDT</a><a class="side-link" data-page="orders" onclick="showDashPage('orders',this)"><span class="sicon"><svg viewbox="0 0 24 24"><rect height="17" rx="3" width="16" x="4" y="3.5"></rect><path d="M8 8h8M8 12h8M8 16h5"></path></svg></span>Orders</a><a class="side-link" data-page="wallet" onclick="showDashPage('wallet',this)"><span class="sicon"><svg viewbox="0 0 24 24"><path d="M4 7.5h15a2 2 0 0 1 2 2v9H6a2 2 0 0 1-2-2z"></path><path d="M4 8V6.5A2.5 2.5 0 0 1 6.5 4H17"></path><path d="M16 12h5v4h-5a2 2 0 0 1 0-4z"></path></svg></span>Wallet</a><a class="side-link" data-page="account" onclick="showDashPage('account',this)"><span class="sicon"><svg viewbox="0 0 24 24"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 20c.8-4.2 3.4-6.5 7.5-6.5s6.7 2.3 7.5 6.5"></path></svg></span>Account</a></nav>
+<div class="side-bottom"><div class="profile-mini"><div class="avatar">D</div><div><b>Demo User</b><small>Verified buyer</small></div></div><button class="btn dark full" onclick="logout()" style="margin-top:8px">Logout</button></div>
+</aside>
+<div class="dash-main">
+<header class="dash-top"><div class="dash-title"><b id="dashTitle">Overview</b><small>LOKTRON account workspace</small></div><div class="dash-actions"><button aria-label="Search" class="icon-btn"><svg viewbox="0 0 24 24"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg></button><button aria-label="Account notifications" class="icon-btn" onclick="showDashPage('account')"><svg viewbox="0 0 24 24"><path d="M7 17h10l-1.2-2v-4.3a3.8 3.8 0 0 0-7.6 0V15z"></path><path d="M10 20h4"></path></svg></button></div></header>
+<div class="content">
+<section class="dash-page active" id="overview">
+<div class="dash-welcome">
+<div class="dash-welcome-copy"><span>WELCOME BACK</span><h2>Buy digital assets with a clearer workflow.</h2><p>Manage your wallet, INR purchase orders and account activity from one workspace.</p></div>
+<div class="dash-welcome-meta"><div><small>INR RATE</small><b>₹112.40</b></div><div><small>SUPPORT</small><b>Online</b></div></div>
+</div><div class="system-strip"><span><i class="live-dot"></i> Platform operational</span><span id="apiStatus">Server connected</span><span id="lastSync">Synced just now</span></div>
+<div class="cards-4">
+<div class="kpi"><small>Total orders</small><b id="kpiOrders">0</b><div class="delta">All submitted orders</div></div>
+<div class="kpi"><small>USDT received</small><b id="kpiUsdt">0 USDT</b><div class="delta">Completed purchases</div></div>
+<div class="kpi"><small>INR volume</small><b id="kpiInr">₹0</b><div class="delta">Lifetime purchase amount</div></div>
+<div class="kpi"><small>Wallet status</small><b id="kpiWallet">Not saved</b><div class="delta">TRC20 receiving address</div></div>
+</div>
+<div class="dashboard-grid">
+<div class="panel"><div class="panel-head"><h3>Recent orders</h3><span>Last 5</span></div><div id="recentOrders"></div></div>
+<div class="panel"><div class="panel-head"><h3>Quick actions</h3></div>
+<div style="display:grid;gap:8px"><button class="btn primary full" onclick="showDashPage('buy')">Create Buy order</button><button class="btn secondary full" onclick="showDashPage('wallet')">Manage USDT wallet</button><button class="btn secondary full" onclick="showDashPage('account')">Account &amp; support</button></div>
+<div class="notice" style="margin-top:12px">INR is currently live. USD, EUR and GBP are marked Coming Soon.</div>
+<div class="overview-tools"><div class="mini-tool"><span class="tool-icon">?</span><div><b>Support desk</b><small>Payment, wallet or UTR help</small></div><button onclick="showDashPage('account')">Open</button></div><div class="mini-tool"><span class="tool-icon">§</span><div><b>Policies</b><small>Privacy, terms and refunds</small></div><button onclick="showDashPage('account')">View</button></div></div></div>
+</div>
+</section>
+<section class="dash-page" id="buy">
+<div class="dashboard-grid">
+<div class="panel">
+<div class="panel-head"><h3>Buy USDT</h3><span>INR LIVE</span></div>
+<div class="alert" id="buyLock">Save your USDT receiving address first from the Wallet page.</div>
+<div class="hidden" id="buyArea">
+<div class="form-grid"><div><span class="label">INR amount</span><input class="input" id="buyInr" oninput="calcBuy()" type="number" value="100000"/></div><div><span class="label">Current rate</span><input class="input" disabled="" id="rateDisplay" value="₹112.40 / USDT"/></div></div>
+<div style="margin-top:12px;padding:14px;border-radius:14px;background:#f5f7ff;border:1px solid #dfe5ff;display:flex;justify-content:space-between"><span><small class="small">Estimated receive</small><br/><b id="buyUsdt">889.68 USDT</b></span><span style="text-align:right"><small class="small">Network</small><br/><b>TRC20</b></span></div>
+<div class="bank-card" style="margin-top:12px"><span class="bank-badge">ADMIN BANK DETAILS</span><div class="line-row"><span>Bank</span><strong id="bankName">HDFC Bank</strong></div><div class="line-row"><span>Account name</span><strong id="bankAccountName">LOKTRON SERVICES</strong></div><div class="line-row"><span>Account number</span><strong id="bankAccountNumber">XXXX XXXX 4582</strong></div><div class="line-row"><span>IFSC</span><strong id="bankIfsc">HDFC0001234</strong></div><div class="line-row"><span>Transfer</span><strong id="bankTransferTypes">IMPS / NEFT / RTGS</strong></div></div>
+<div class="notice" style="margin-top:10px">Pay only to the bank details displayed on this order page. Confirm beneficiary details before transferring INR.</div>
+<div style="margin-top:12px"><span class="label">Payment proof</span><div class="upload"><input accept="image/*" id="proofInput" onchange="proofChanged()" type="file"/><b id="proofLabel">Upload payment screenshot</b><span style="font-size:8px">PNG / JPG / screenshot</span></div></div>
+<div class="form-grid" style="margin-top:10px"><div><span class="label">Exact amount paid</span><input class="input" id="paidAmount" placeholder="100000" type="number"/></div><div><span class="label">UTR / Reference</span><input class="input" id="utr" placeholder="Enter UTR"/></div></div>
+<button class="btn primary full" onclick="submitOrder()" style="margin-top:12px">Submit payment for verification</button>
+</div>
+</div>
+<div class="panel"><div class="panel-head"><h3>Receiving wallet</h3></div><div class="notice" id="buyWalletDisplay">No wallet saved.</div><div class="panel-head" style="margin-top:16px"><h3>Buy summary</h3></div><div class="notice" id="buySummary">Enter an INR amount to see the purchase summary.</div></div>
+</div>
+</section>
+<section class="dash-page" id="orders">
+<div class="panel"><div class="panel-head"><h3>Orders</h3><span>All statuses</span></div><div class="order-filter"><button class="filter-chip active" data-status="all" onclick="setOrderFilter('all',this)">All</button><button class="filter-chip" data-status="Under Review" onclick="setOrderFilter('Under Review',this)">Review</button><button class="filter-chip" data-status="USDT Sent" onclick="setOrderFilter('USDT Sent',this)">Completed</button></div>
+<div class="order-summary-strip">
+<div><span>All Orders</span><b id="orderCountMini">0</b></div>
+<div><span>Under Review</span><b id="reviewCountMini">0</b></div>
+<div><span>Completed</span><b id="completedCountMini">0</b></div>
+</div>
+<table class="order-table"><thead><tr><th>ORDER</th><th>DATE</th><th>INR</th><th>USDT</th><th>UTR</th><th>STATUS</th></tr></thead><tbody id="ordersTable"></tbody></table></div>
+</section>
+<section class="dash-page" id="wallet">
+<div class="dashboard-grid">
+<div class="panel"><div class="panel-head"><h3>USDT receiving wallet</h3><span>TRC20</span></div><p class="notice">Save the address where you want purchased USDT to be delivered. Review it carefully before placing any order.</p>
+<div id="walletEmpty"><span class="label">TRC20 address</span><input class="input" id="walletInput" placeholder="Enter USDT TRC20 address"/><button class="btn primary" onclick="saveWallet()" style="margin-top:10px">Save wallet</button></div>
