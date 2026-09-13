@@ -11,7 +11,7 @@ const files = (await readdir(srcDir))
 if (files.length !== 11) throw new Error(`Expected 11 editable LOKTRON source parts, found ${files.length}`);
 const chunks = await Promise.all(files.map(name => readFile(join(srcDir,name),'utf8')));
 const html = chunks.join('');
-for (const marker of ['<!DOCTYPE html>','LOKTRON','Buy USDT','id="dashboard"','/api/auth/login','</html>']) {
+for (const marker of ['<!DOCTYPE html>','LOKTRON','Buy USDT','id="dashboard"',"api('/auth/login'",'</html>']) {
   if (!html.includes(marker)) throw new Error(`Editable website source verification failed: missing ${marker}`);
 }
 if (Buffer.byteLength(html) < 92000) throw new Error(`Editable website source unexpectedly small: ${Buffer.byteLength(html)} bytes`);
