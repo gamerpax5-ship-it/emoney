@@ -23,12 +23,12 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        getWindow().setStatusBarColor(Color.rgb(5, 5, 5));
-        getWindow().setNavigationBarColor(Color.rgb(5, 5, 5));
+        getWindow().setStatusBarColor(Color.rgb(7, 5, 18));
+        getWindow().setNavigationBarColor(Color.rgb(7, 5, 18));
         getWindow().getDecorView().setSystemUiVisibility(0);
 
         webView = new WebView(this);
-        webView.setBackgroundColor(Color.rgb(5, 5, 5));
+        webView.setBackgroundColor(Color.rgb(7, 5, 18));
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         webView.setVerticalScrollBarEnabled(false);
         webView.setHorizontalScrollBarEnabled(false);
@@ -45,7 +45,7 @@ public class MainActivity extends Activity {
         settings.setTextZoom(100);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " WTRON-P2P/1.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " digiRupee/1.0");
 
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
         webView.setWebViewClient(new WebViewClient());
