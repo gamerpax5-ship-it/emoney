@@ -13,8 +13,11 @@ if (!encoded) throw new Error('LOKTRON website bundle is empty');
 const html = brotliDecompressSync(Buffer.from(encoded, 'base64'));
 const source = html.toString('utf8');
 
-for (const marker of ['LOKTRON', 'Buy USDT', '<!DOCTYPE html']) {
+for (const marker of ['LOKTRON', 'Buy USDT']) {
   if (!source.includes(marker)) throw new Error(`Website verification failed: missing ${marker}`);
+}
+if (!/^\s*<!doctype html>/i.test(source)) {
+  throw new Error('Website verification failed: invalid HTML doctype');
 }
 
 await writeFile(outputPath, html);
