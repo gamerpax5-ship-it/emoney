@@ -28,6 +28,7 @@ const tronApiUrl = String(process.env.TRON_API_URL || 'https://api.trongrid.io')
 const tronApiKey = String(process.env.TRONGRID_API_KEY || '');
 const tronUsdtContract = String(process.env.TRON_USDT_CONTRACT || 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj');
 const tronVerifyMode = String(process.env.TRON_VERIFY_MODE || (production ? 'required' : 'manual')).toLowerCase();
+const alertWebhookUrl = String(process.env.ALERT_WEBHOOK_URL || '').trim();
 
 if (!process.env.SESSION_SECRET) {
   console.warn('SESSION_SECRET is not configured; sessions will reset when this process restarts.');
@@ -91,6 +92,7 @@ const defaultData = {
     createdAt: Date.now()
   }],
   orders: [],
+  bankLedger: [],
   tickets: [],
   auditLog: [],
   notifications: [{
@@ -103,10 +105,8 @@ const defaultData = {
 };
 
 let db = await loadDb();
-const adminEmail = String(process.env.ADMIN_EMAIL || 'admin@loktron.local').toLowerCase();
-const adminPassword = String(process.env.ADMIN_PASSWORD || 'ChangeMe-LOKTRON-2026');
-const adminPasswordHash = String(process.env.ADMIN_PASSWORD_HASH || '');
-const adminConfigured = !!(process.env.ADMIN_EMAIL && (process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD_HASH));
+const adminUsers = parseAdminUsers();
+const adminConfigured = adminUsers.length > 0;
 
 if (production && !adminConfigured) {
   console.error('Admin login is disabled until ADMIN_EMAIL and ADMIN_PASSWORD or ADMIN_PASSWORD_HASH are configured.');
@@ -121,6 +121,7 @@ async function loadDb() {
       config: { ...structuredClone(defaultData.config), ...(parsed.config || {}) },
       users: Array.isArray(parsed.users) ? parsed.users : [],
       orders: Array.isArray(parsed.orders) ? parsed.orders : [],
+      bankLedger: Array.isArray(parsed.bankLedger) ? parsed.bankLedger : [],
       tickets: Array.isArray(parsed.tickets) ? parsed.tickets : [],
       notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
       auditLog: Array.isArray(parsed.auditLog) ? parsed.auditLog : []
@@ -203,10 +204,10 @@ function makeSession(uid) {
   return `${payload}.${sig}`;
 }
 
-function makeAdminSession(email) {
+function makeAdminSession(admin) {
   const payload = Buffer.from(JSON.stringify({
-    email,
-    role: 'admin',
+    email: admin.email,
+    role: admin.role,
     exp: Date.now() + adminSessionMaxAge * 1000
   })).toString('base64url');
   const sig = createHmac('sha256', sessionSecret).update(`admin:${payload}`).digest('base64url');
@@ -221,10 +222,12 @@ function verifyAdminSession(token) {
     const actual = Buffer.from(sig, 'base64url');
     if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return '';
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    if (data.role !== 'admin' || data.email !== adminEmail || Number(data.exp) < Date.now()) return '';
-    return data.email;
+    if (!data.email || Number(data.exp) < Date.now()) return '';
+    const admin = findAdmin(data.email);
+    if (!admin || admin.role !== data.role) return '';
+    return admin;
   } catch {
-    return '';
+    return null;
   }
 }
 
@@ -268,11 +271,17 @@ function auth(req) {
 
 function adminAuth(req) {
   const token = bearer(req);
-  const email = verifyAdminSession(token);
-  if (!email) {
+  const admin = verifyAdminSession(token);
+  if (!admin) {
     throw Object.assign(new Error('Admin authentication required'), { status: 401 });
   }
-  return { email };
+  return admin;
+}
+
+function requireAdminRole(admin, roles) {
+  if (!roles.includes(admin.role)) {
+    throw Object.assign(new Error('Admin role is not allowed for this action'), { status: 403 });
+  }
 }
 
 function publicUser(u) {
@@ -355,9 +364,49 @@ function auditHealthy() {
   return true;
 }
 
-function verifyAdminPassword(password) {
-  if (adminPasswordHash) return verifyPassword(password, adminPasswordHash);
-  return safeEqualText(password, adminPassword);
+function parseAdminUsers() {
+  const raw = String(process.env.ADMIN_USERS || '').trim();
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) throw new Error('ADMIN_USERS must be an array');
+      return parsed.map((item, index) => ({
+        email: String(item.email || '').trim().toLowerCase(),
+        password: String(item.password || ''),
+        passwordHash: String(item.passwordHash || ''),
+        role: ['owner', 'ops', 'support'].includes(String(item.role || 'ops')) ? String(item.role || 'ops') : 'ops',
+        mfaCode: String(item.mfaCode || '')
+      })).filter(item => safeEmail(item.email) && (item.password || item.passwordHash || (!production && index === 0)));
+    } catch (error) {
+      console.error('ADMIN_USERS is invalid JSON:', error.message);
+      return [];
+    }
+  }
+  const email = String(process.env.ADMIN_EMAIL || (production ? '' : 'admin@loktron.local')).trim().toLowerCase();
+  const password = String(process.env.ADMIN_PASSWORD || (production ? '' : 'ChangeMe-LOKTRON-2026'));
+  const passwordHash = String(process.env.ADMIN_PASSWORD_HASH || '');
+  if (!safeEmail(email) || (!password && !passwordHash)) return [];
+  return [{
+    email,
+    password,
+    passwordHash,
+    role: ['owner', 'ops', 'support'].includes(String(process.env.ADMIN_ROLE || 'owner')) ? String(process.env.ADMIN_ROLE || 'owner') : 'owner',
+    mfaCode: String(process.env.ADMIN_MFA_CODE || '')
+  }];
+}
+
+function findAdmin(email) {
+  return adminUsers.find(item => safeEqualText(item.email, String(email || '').trim().toLowerCase()));
+}
+
+function verifyAdminPassword(admin, password) {
+  if (admin.passwordHash) return verifyPassword(password, admin.passwordHash);
+  return safeEqualText(password, admin.password);
+}
+
+function verifyAdminMfa(admin, code) {
+  if (!admin.mfaCode) return true;
+  return safeEqualText(String(code || '').trim(), admin.mfaCode);
 }
 
 function clientIp(req) {
@@ -484,6 +533,99 @@ function proofExt(type) {
   return type === 'image/png' ? '.png' : type === 'image/webp' ? '.webp' : '.jpg';
 }
 
+function normalizeReference(value) {
+  return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function publicBankEntry(entry) {
+  const { normalizedReference, ...safe } = entry;
+  return safe;
+}
+
+function parseBankEntry(raw) {
+  const reference = String(raw.reference || raw.utr || raw.ref || '').trim().slice(0, 80);
+  const amount = Number(raw.amount || raw.inr || raw.paid);
+  if (normalizeReference(reference).length < 6 || !Number.isFinite(amount) || amount <= 0) return null;
+  return {
+    reference,
+    normalizedReference: normalizeReference(reference),
+    amount: Number(amount.toFixed(2)),
+    date: String(raw.date || new Date().toISOString()).slice(0, 40),
+    source: String(raw.source || 'manual-import').slice(0, 60),
+    note: String(raw.note || '').slice(0, 220)
+  };
+}
+
+async function autoMatchBankLedger(admin) {
+  const matched = [];
+  for (const entry of db.bankLedger) {
+    if (entry.status === 'matched') continue;
+    const order = db.orders.find(item =>
+      item.status === 'Under Review' &&
+      normalizeReference(item.utr) === entry.normalizedReference &&
+      Math.abs(Number(item.paid || item.inr) - Number(entry.amount)) <= 1
+    );
+    if (!order) continue;
+    order.status = 'Payment Verified';
+    order.paymentVerification = {
+      bankReference: entry.reference,
+      note: `Auto-matched from bank ledger import ${entry.id}`,
+      verifiedAt: Date.now(),
+      verifiedBy: admin.email,
+      ledgerEntryId: entry.id
+    };
+    order.updatedAt = Date.now();
+    entry.status = 'matched';
+    entry.matchedOrderId = order.id;
+    entry.matchedAt = Date.now();
+    db.notifications.unshift({
+      id: randomUUID(),
+      userId: order.userId,
+      title: 'Payment verified',
+      text: `${order.id} payment matched in bank ledger and is queued for USDT delivery.`,
+      time: 'Just now'
+    });
+    appendAudit({ actorType: 'admin', actorId: admin.email, action: 'order.payment_auto_verified', entityType: 'order', entityId: order.id, details: { ledgerEntryId: entry.id, bankReference: entry.reference, amount: entry.amount } });
+    await emitAlert('order.payment_auto_verified', { orderId: order.id, ledgerEntryId: entry.id, amount: entry.amount, utr: order.utr });
+    matched.push(order.id);
+  }
+  return matched;
+}
+
+async function emitAlert(event, payload) {
+  if (!alertWebhookUrl) return;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    try {
+      await fetch(alertWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event, at: new Date().toISOString(), payload }),
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (error) {
+    console.warn('Alert webhook failed:', error.message);
+  }
+}
+
+function backupSnapshot() {
+  return {
+    exportedAt: new Date().toISOString(),
+    schema: 'loktron-runtime-v2',
+    config: db.config,
+    users: db.users,
+    orders: db.orders,
+    bankLedger: db.bankLedger,
+    tickets: db.tickets,
+    notifications: db.notifications,
+    auditLog: db.auditLog
+  };
+}
+
 function headers(type) {
   return {
     'Content-Type': type,
@@ -509,12 +651,16 @@ async function api(req, res, path) {
     const b = await body(req);
     const email = String(b.email || '').trim().toLowerCase();
     const password = String(b.password || '');
-    if (!safeEqualText(email, adminEmail) || !verifyAdminPassword(password)) {
+    const admin = findAdmin(email);
+    if (!admin || !verifyAdminPassword(admin, password)) {
       return send(res, 401, { error: 'Invalid admin credentials' });
     }
-    appendAudit({ actorType: 'admin', actorId: email, action: 'admin.login', entityType: 'session', entityId: email });
+    if (!verifyAdminMfa(admin, b.mfaCode)) {
+      return send(res, 401, { error: 'Admin MFA code required' });
+    }
+    appendAudit({ actorType: 'admin', actorId: email, action: 'admin.login', entityType: 'session', entityId: email, details: { role: admin.role, mfa: !!admin.mfaCode } });
     await persist();
-    return send(res, 200, { token: makeAdminSession(email), expiresIn: adminSessionMaxAge });
+    return send(res, 200, { token: makeAdminSession(admin), expiresIn: adminSessionMaxAge, admin: { email: admin.email, role: admin.role, mfaEnabled: !!admin.mfaCode } });
   }
 
   if (req.method === 'POST' && path === '/admin/logout') {
@@ -525,19 +671,27 @@ async function api(req, res, path) {
   }
 
   if (req.method === 'GET' && path === '/admin/overview') {
-    adminAuth(req);
+    const admin = adminAuth(req);
     return send(res, 200, {
+      admin: { email: admin.email, role: admin.role, mfaEnabled: !!admin.mfaCode },
       config: db.config,
       orders: db.orders,
+      bankLedger: db.bankLedger.slice(-500).reverse().map(publicBankEntry),
       tickets: db.tickets,
       users: db.users.map(publicUser),
       auditLog: db.auditLog.slice(-250).reverse(),
-      auditHealthy: auditHealthy()
+      auditHealthy: auditHealthy(),
+      system: {
+        alertingEnabled: !!alertWebhookUrl,
+        adminRoles: adminUsers.map(item => ({ email: item.email, role: item.role, mfaEnabled: !!item.mfaCode })),
+        bankLedgerEntries: db.bankLedger.length
+      }
     });
   }
 
   if (req.method === 'PATCH' && path === '/admin/config') {
     const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner']);
     const b = await body(req);
     const rate = Number(b.rate);
     if (!Number.isFinite(rate) || rate <= 0) return send(res, 400, { error: 'Invalid rate' });
@@ -555,8 +709,48 @@ async function api(req, res, path) {
     return send(res, 200, { config: db.config });
   }
 
+  if (req.method === 'GET' && path === '/admin/export') {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner']);
+    appendAudit({ actorType: 'admin', actorId: admin.email, action: 'backup.exported', entityType: 'backup', entityId: 'runtime' });
+    await persist();
+    return send(res, 200, backupSnapshot(), {
+      'Content-Disposition': `attachment; filename="loktron-backup-${new Date().toISOString().slice(0, 10)}.json"`
+    });
+  }
+
+  if (req.method === 'POST' && path === '/admin/bank-ledger/import') {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
+    const b = await body(req, 700_000);
+    const rawEntries = Array.isArray(b.entries) ? b.entries : [];
+    if (!rawEntries.length || rawEntries.length > 500) return send(res, 400, { error: 'Upload 1 to 500 bank ledger entries' });
+    let imported = 0;
+    let skipped = 0;
+    for (const raw of rawEntries) {
+      const parsed = parseBankEntry(raw);
+      if (!parsed) { skipped += 1; continue; }
+      const duplicate = db.bankLedger.find(entry => entry.normalizedReference === parsed.normalizedReference && Math.abs(Number(entry.amount) - parsed.amount) <= 1);
+      if (duplicate) { skipped += 1; continue; }
+      db.bankLedger.push({
+        id: 'BL-' + randomUUID().replace(/-/g, '').slice(0, 10).toUpperCase(),
+        ...parsed,
+        status: 'unmatched',
+        importedAt: Date.now(),
+        importedBy: admin.email
+      });
+      imported += 1;
+    }
+    const matchedOrderIds = await autoMatchBankLedger(admin);
+    appendAudit({ actorType: 'admin', actorId: admin.email, action: 'bank_ledger.imported', entityType: 'bank-ledger', entityId: 'batch', details: { imported, skipped, matched: matchedOrderIds.length } });
+    await emitAlert('bank_ledger.imported', { imported, skipped, matched: matchedOrderIds.length });
+    await persist();
+    return send(res, 200, { imported, skipped, matched: matchedOrderIds.length, matchedOrderIds, bankLedger: db.bankLedger.slice(-500).reverse().map(publicBankEntry) });
+  }
+
   if (req.method === 'POST' && /^\/admin\/orders\/[A-Za-z0-9-]+\/verify-payment$/.test(path)) {
     const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
     const id = path.split('/').at(-2);
     const b = await body(req);
     const order = db.orders.find(x => x.id === id);
@@ -576,12 +770,14 @@ async function api(req, res, path) {
       time: 'Just now'
     });
     appendAudit({ actorType: 'admin', actorId: admin.email, action: 'order.payment_verified', entityType: 'order', entityId: order.id, details: { bankReference, note } });
+    await emitAlert('order.payment_verified', { orderId: order.id, inr: order.inr, utr: order.utr, verifiedBy: admin.email });
     await persist();
     return send(res, 200, { order });
   }
 
   if (req.method === 'POST' && /^\/admin\/orders\/[A-Za-z0-9-]+\/settle$/.test(path)) {
     const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
     const id = path.split('/').at(-2);
     const b = await body(req);
     const order = db.orders.find(x => x.id === id);
@@ -596,12 +792,14 @@ async function api(req, res, path) {
     order.updatedAt = Date.now();
     db.notifications.unshift({ id: randomUUID(), userId: order.userId, title: 'USDT sent', text: `${order.id} was settled on ${db.config.network}.`, time: 'Just now' });
     appendAudit({ actorType: 'admin', actorId: admin.email, action: 'order.settled', entityType: 'order', entityId: order.id, details: { txId, wallet: order.wallet, usdt: order.usdt, network: db.config.network, verification: chainVerification.mode } });
+    await emitAlert('order.settled', { orderId: order.id, usdt: order.usdt, txId, wallet: order.wallet, recordedBy: admin.email });
     await persist();
     return send(res, 200, { order });
   }
 
   if (req.method === 'POST' && /^\/admin\/orders\/[A-Za-z0-9-]+\/reject$/.test(path)) {
     const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
     const id = path.split('/').at(-2);
     const b = await body(req);
     const order = db.orders.find(x => x.id === id);
@@ -614,12 +812,13 @@ async function api(req, res, path) {
     order.updatedAt = Date.now();
     db.notifications.unshift({ id: randomUUID(), userId: order.userId, title: 'Order needs attention', text: `${order.id}: ${reason}`, time: 'Just now' });
     appendAudit({ actorType: 'admin', actorId: admin.email, action: 'order.rejected', entityType: 'order', entityId: order.id, details: { reason } });
+    await emitAlert('order.rejected', { orderId: order.id, reason, rejectedBy: admin.email });
     await persist();
     return send(res, 200, { order });
   }
 
   if (req.method === 'GET' && /^\/admin\/orders\/[A-Za-z0-9-]+\/proof$/.test(path)) {
-    adminAuth(req);
+    requireAdminRole(adminAuth(req), ['owner', 'ops']);
     const id = path.split('/').at(-2);
     const order = db.orders.find(x => x.id === id);
     if (!order?.proofFile) return send(res, 404, { error: 'Payment proof not found' });
@@ -633,6 +832,7 @@ async function api(req, res, path) {
 
   if (req.method === 'PATCH' && /^\/admin\/tickets\/[A-Za-z0-9-]+$/.test(path)) {
     const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops', 'support']);
     const id = path.split('/').pop();
     const b = await body(req);
     const ticket = db.tickets.find(x => x.id === id);
@@ -858,7 +1058,10 @@ const server = http.createServer(async (req, res) => {
         auth: 'signed-cookie-session',
         audit: auditHealthy() ? 'valid' : 'invalid',
         settlementVerification: tronVerifyMode,
-        productionConfiguration: production ? (ready ? 'ready' : 'incomplete') : 'development'
+        productionConfiguration: production ? (ready ? 'ready' : 'incomplete') : 'development',
+        adminMfa: adminUsers.some(item => item.mfaCode) ? 'enabled' : 'not-configured',
+        alerting: alertWebhookUrl ? 'enabled' : 'not-configured',
+        bankLedgerEntries: db.bankLedger.length
       });
     }
 

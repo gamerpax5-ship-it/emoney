@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DIGIRUPEE_WEB_APP_URL: https://tronpay-production.up.railway.app/
+      HAS_ANDROID_SIGNING: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' && secrets.ANDROID_STORE_PASSWORD != '' }}
     permissions:
       contents: read
     steps:
@@ -58,6 +59,24 @@ jobs:
           cp android/app/build/outputs/apk/release/app-release-unsigned.apk dist/digiRupee-release-unsigned.apk
           test -s dist/digiRupee-debug.apk
           test -s dist/digiRupee-release-unsigned.apk
+
+      - name: Sign release APK when signing secrets are configured
+        if: ${{ env.HAS_ANDROID_SIGNING == 'true' }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > release.keystore
+          cp dist/digiRupee-release-unsigned.apk dist/digiRupee-release-signed.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+            --ks release.keystore \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass "pass:$ANDROID_STORE_PASSWORD" \
+            --key-pass "pass:$ANDROID_KEY_PASSWORD" \
+            dist/digiRupee-release-signed.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify dist/digiRupee-release-signed.apk
 
       - name: Upload digiRupee APK artifacts
         uses: actions/upload-artifact@v4

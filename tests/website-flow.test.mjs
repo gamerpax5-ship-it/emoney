@@ -49,6 +49,7 @@ test('complete user, verification and settlement flow', async t => {
       SESSION_SECRET: 'test-session-secret-that-is-long-and-stable',
       ADMIN_EMAIL: 'admin@example.com',
       ADMIN_PASSWORD: 'Strong-Test-Password-2026',
+      ADMIN_MFA_CODE: '246810',
       TRON_VERIFY_MODE: 'required',
       TRON_API_URL: `http://127.0.0.1:${tronPort}`
     }
@@ -122,12 +123,37 @@ test('complete user, verification and settlement flow', async t => {
   assert.equal(replay.payload.replayed, true);
   assert.equal(replay.payload.order.id, created.payload.order.id);
 
-  const adminLogin = await request('/api/admin/login', {
+  const secondOrderBody = JSON.stringify({ inr: 22480, paid: 22480, utr: 'UTR222222222', proof: { type: 'image/png', data: png } });
+  const createdByLedger = await request('/api/orders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie, 'Idempotency-Key': 'test-order-key-222222222' },
+    body: secondOrderBody
+  });
+  assert.equal(createdByLedger.response.status, 201);
+  assert.equal(createdByLedger.payload.order.status, 'Under Review');
+
+  const adminMfaMissing = await request('/api/admin/login', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: 'admin@example.com', password: 'Strong-Test-Password-2026' })
   });
+  assert.equal(adminMfaMissing.response.status, 401);
+
+  const adminLogin = await request('/api/admin/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'admin@example.com', password: 'Strong-Test-Password-2026', mfaCode: '246810' })
+  });
   assert.equal(adminLogin.response.status, 200);
   const adminHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${adminLogin.payload.token}` };
+
+  const ledgerImport = await request('/api/admin/bank-ledger/import', {
+    method: 'POST',
+    headers: adminHeaders,
+    body: JSON.stringify({ entries: [{ reference: 'UTR222222222', amount: 22480, date: '2026-09-13', note: 'Bank statement credit' }] })
+  });
+  assert.equal(ledgerImport.response.status, 200);
+  assert.equal(ledgerImport.payload.imported, 1);
+  assert.equal(ledgerImport.payload.matched, 1);
+  assert.deepEqual(ledgerImport.payload.matchedOrderIds, [createdByLedger.payload.order.id]);
 
   const earlySettle = await request(`/api/admin/orders/${created.payload.order.id}/settle`, {
     method: 'POST', headers: adminHeaders, body: JSON.stringify({ txId: 'a'.repeat(64) })
@@ -149,10 +175,14 @@ test('complete user, verification and settlement flow', async t => {
 
   const account = await request('/api/me', { headers: { Cookie: cookie } });
   assert.equal(account.response.status, 200);
-  assert.equal(account.payload.orders.length, 1);
-  assert.equal(account.payload.orders[0].settlement.txId, 'a'.repeat(64));
-  assert.equal(account.payload.orders[0].proofFile, undefined);
-  assert.equal(account.payload.orders[0].idempotencyKey, undefined);
+  assert.equal(account.payload.orders.length, 2);
+  const settledOrder = account.payload.orders.find(order => order.id === created.payload.order.id);
+  const ledgerOrder = account.payload.orders.find(order => order.id === createdByLedger.payload.order.id);
+  assert.equal(settledOrder.settlement.txId, 'a'.repeat(64));
+  assert.equal(settledOrder.proofFile, undefined);
+  assert.equal(settledOrder.idempotencyKey, undefined);
+  assert.equal(ledgerOrder.status, 'Payment Verified');
+  assert.equal(ledgerOrder.paymentVerification.bankReference, 'UTR222222222');
 
   const proofDenied = await request(`/api/admin/orders/${created.payload.order.id}/proof`);
   assert.equal(proofDenied.response.status, 401);
@@ -163,6 +193,14 @@ test('complete user, verification and settlement flow', async t => {
   const overview = await request('/api/admin/overview', { headers: { Authorization: `Bearer ${adminLogin.payload.token}` } });
   assert.equal(overview.response.status, 200);
   assert.equal(overview.payload.auditHealthy, true);
+  assert.equal(overview.payload.admin.mfaEnabled, true);
+  assert.equal(overview.payload.system.bankLedgerEntries, 1);
   assert.ok(overview.payload.auditLog.some(entry => entry.action === 'order.payment_verified'));
+  assert.ok(overview.payload.auditLog.some(entry => entry.action === 'order.payment_auto_verified'));
   assert.ok(overview.payload.auditLog.some(entry => entry.action === 'order.settled'));
+
+  const backup = await request('/api/admin/export', { headers: { Authorization: `Bearer ${adminLogin.payload.token}` } });
+  assert.equal(backup.response.status, 200);
+  assert.equal(backup.payload.schema, 'loktron-runtime-v2');
+  assert.ok(Array.isArray(backup.payload.orders));
 });
