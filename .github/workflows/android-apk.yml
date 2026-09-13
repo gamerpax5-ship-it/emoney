@@ -5,34 +5,26 @@ on:
     branches: [ main ]
     paths:
       - 'android/**'
-      - 'ui/app-final-br-parts/**'
-      - 'scripts/prepare-assets.mjs'
       - '.github/workflows/android-apk.yml'
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      DIGIRUPEE_WEB_APP_URL: https://tronpay-production.up.railway.app/
     permissions:
       contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Node 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Rebuild approved Android HTML asset
-        run: node scripts/prepare-assets.mjs
-
-      - name: Verify digiRupee branding and UI asset
+      - name: Verify digiRupee branding and live URL config
         run: |
-          test -s android/app/src/main/assets/index.html
           test -s android/app/src/main/res/drawable-nodpi/digirupee_logo.webp
           grep -q 'digiRupee' android/app/src/main/res/values/strings.xml
           grep -q 'digirupee_logo' android/app/src/main/AndroidManifest.xml
+          grep -q 'WEB_APP_URL' android/app/build.gradle.kts
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -53,11 +45,11 @@ jobs:
 
       - name: Build debug APK
         working-directory: android
-        run: gradle --no-daemon assembleDebug
+        run: gradle --no-daemon assembleDebug -PwebAppUrl="$DIGIRUPEE_WEB_APP_URL"
 
       - name: Build unsigned release APK
         working-directory: android
-        run: gradle --no-daemon assembleRelease
+        run: gradle --no-daemon assembleRelease -PwebAppUrl="$DIGIRUPEE_WEB_APP_URL"
 
       - name: Prepare named APK files
         run: |

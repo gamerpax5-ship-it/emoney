@@ -47,7 +47,13 @@ The same site can also be opened directly from `website/index.html`, but serving
 
 ## Android APK
 
-The Android project uses a local WebView asset bundle, so the approved UI does not depend on a remote website. It supports JavaScript, localStorage/DOM storage, navigation, and HTML file inputs for payment-proof selection.
+The Android project is branded as **digiRupee** and loads the live LOKTRON website in a secure WebView:
+
+```text
+https://tronpay-production.up.railway.app/
+```
+
+That keeps Android on the same production UI and backend logic as the website. It supports JavaScript, HttpOnly session cookies, localStorage/DOM storage, navigation, and HTML file inputs for payment-proof selection. Override the target site at build time with `-PwebAppUrl=<url>` or `DIGIRUPEE_WEB_APP_URL`.
 
 GitHub Actions automatically builds:
 
