@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, readdir, watch, watchFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, readdir } from 'node:fs/promises';
 import { watch as fsWatch, watchFile as fsWatchFile } from 'node:fs';
 import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -96,7 +96,7 @@ async function persistAllFiles() {
 }
 
 let stateTimer;
-let fileTimers = new Map();
+const fileTimers = new Map();
 function queueStateSync() {
   clearTimeout(stateTimer);
   stateTimer = setTimeout(() => persistState().catch(e => console.error(e.message)), 250);
