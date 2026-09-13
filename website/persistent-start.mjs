@@ -126,6 +126,9 @@ if (persistenceEnabled) {
 await import('./server.mjs');
 
 if (persistenceEnabled) {
+  if (String(process.env.AUDIT_REPAIR_ON_BOOT || '').toLowerCase() === 'true') {
+    await persistState();
+  }
   fsWatchFile(dataFile, { interval: 500 }, queueStateSync);
   try {
     fsWatch(uploadDir, (event, filename) => queueFileSync(String(filename || '')));
