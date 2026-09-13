@@ -1,0 +1,87 @@
+<div class="hidden" id="walletSaved"><div id="walletText" style="padding:13px;border-radius:13px;background:#f3f7fb;border:1px solid #dde6ef;word-break:break-all;font-size:10px"></div><button class="btn secondary" onclick="editWallet()" style="margin-top:9px">Change wallet</button></div>
+</div>
+<div class="panel"><div class="panel-head"><h3>Wallet checklist</h3></div><div class="notice">• Use the supported USDT network only.<br/>• Verify the complete address before saving.<br/>• Submitted orders should retain their original destination.<br/>• Contact support before fulfilment if you spot an address problem.</div></div>
+</div>
+</section>
+<section class="dash-page" id="account">
+<div class="account-hero-3d">
+<div class="account-orb a1"></div><div class="account-orb a2"></div>
+<div class="account-profile">
+<div class="account-avatar">D</div>
+<div>
+<span class="account-kicker">VERIFIED BUYER</span>
+<h2>Demo User</h2>
+<p>demo@loktron.com · Preferred currency INR</p>
+<div class="profile-tags"><span class="tag">Verified</span><span class="tag">INR Buyer</span><span class="tag">Active</span></div>
+</div>
+</div>
+<div class="account-score"><span>Account status</span><b>Good standing</b><small>Wallet, orders and support in one workspace</small></div>
+</div>
+<div class="dashboard-grid">
+<div class="panel panel-3d">
+<div class="panel-head"><h3>Profile details</h3><span>Account information</span></div>
+<div class="form-grid">
+<div><span class="label">Full name</span><input class="input" id="profileName" value="Demo User"/></div>
+<div><span class="label">Email</span><input class="input" id="profileEmail" value="demo@loktron.com"/></div>
+<div><span class="label">Mobile</span><input class="input" id="profileMobile" value="+91 98765 43210"/></div>
+<div><span class="label">Preferred currency</span><select class="select" id="profileCurrency"><option>INR</option></select></div>
+</div>
+<button class="btn primary" onclick="saveProfile()" style="margin-top:14px">Save profile</button>
+</div>
+<div class="panel panel-3d">
+<div class="panel-head"><h3>Notifications</h3><span>Order &amp; account alerts</span></div>
+<div id="notificationList"></div>
+</div>
+</div>
+<div class="dashboard-grid">
+<div class="panel panel-3d">
+<div class="panel-head"><h3>Support</h3><span>Payment, UTR or wallet help</span></div>
+<div class="form-grid">
+<div><span class="label">Order ID</span><input class="input" id="supportOrder" placeholder="Optional"/></div>
+<div><span class="label">Issue type</span><select class="select" id="supportType"><option>Payment not reflected</option><option>Wrong UTR / proof</option><option>Wallet address issue</option><option>General support</option></select></div>
+</div>
+<span class="label" style="margin-top:12px">Message</span>
+<textarea class="textarea" id="supportMessage" placeholder="Explain the issue" rows="4"></textarea>
+<button class="btn primary" onclick="submitSupport()" style="margin-top:12px">Submit ticket</button>
+</div>
+<div class="panel panel-3d">
+<div class="panel-head"><h3>Support history</h3><span>Your latest requests</span></div>
+<div class="support-list" id="ticketList"></div>
+</div>
+</div>
+<div class="panel panel-3d legal-inline">
+<div class="panel-head"><h3>Policies</h3><span>Privacy, terms and refunds</span></div>
+<div class="legal-grid account-legal-grid">
+<div class="legal-card"><h3>Privacy Policy</h3><p>How account, wallet, payment proof and UTR data is handled.</p><button class="btn secondary" onclick="openLegal('privacy')">Open Privacy</button></div>
+<div class="legal-card"><h3>Terms of Service</h3><p>Purchase rules, rates, payment responsibility and permitted use.</p><button class="btn secondary" onclick="openLegal('terms')">Open Terms</button></div>
+<div class="legal-card"><h3>Refund Policy</h3><p>Rules for unfulfilled, duplicate and post-delivery transactions.</p><button class="btn secondary" onclick="openLegal('refund')">Open Refunds</button></div>
+</div>
+</div>
+</section>
+</div>
+</div>
+</div>
+</section>
+<footer class="footer"><div class="wrap"><div class="footer-grid">
+<div><div class="brand"><img alt="LOKTRON — USDT Purchase Platform" class="loktron-wordmark" src="assets/loktron-logo.webp"/></div><p style="font-size:10px;line-height:1.6;max-width:330px">Professional INR-to-USDT purchase workflow with wallet management, payment evidence and account-level order tracking.</p></div>
+<div><h4>Platform</h4><a href="#features">Features</a><a href="#how">How it works</a><a href="#currencies">Currencies</a></div>
+<div><h4>Help</h4><a href="#faq">FAQ</a><a href="#" onclick="openLogin();return false">Support Dashboard</a></div>
+<div><h4>Legal</h4><a href="#" onclick="openLegal('privacy');return false">Privacy</a><a href="#" onclick="openLegal('terms');return false">Terms</a><a href="#" onclick="openLegal('refund');return false">Refunds</a></div>
+</div><div class="copyright">© 2026 LOKTRON. Digital asset values may fluctuate. Blockchain transfers can be irreversible. Availability should comply with applicable laws and payment-provider requirements.</div></div></footer>
+<!-- MODALS -->
+<div class="modal-bg" id="loginModal"><div class="modal"><div class="modal-head"><div><h3>Login to LOKTRON</h3><p>Secure access to your wallet, purchases and order history.</p></div><button class="x" onclick="closeModal('loginModal')">×</button></div><span class="label">Email or mobile</span><input class="input" id="loginId" placeholder="Email address" value="demo@loktron.com"/><span class="label">Password</span><input class="input" id="loginPass" placeholder="Password" type="password" value="12345678"/><button class="btn primary full" onclick="login()" style="margin-top:12px">Login securely</button><p style="text-align:center">Demo account: demo@loktron.com / 12345678</p><div class="auth-divider"><span>or</span></div><button class="btn secondary full" onclick="registerAccount()">Create new account</button><p class="auth-security">Session is managed by the website server, not browser-only demo state.</p></div></div>
+<div class="modal-bg" id="legalModal"><div class="modal"><div class="modal-head"><div><h3 id="legalTitle">Policy</h3><p id="legalIntro"></p></div><button class="x" onclick="closeModal('legalModal')">×</button></div><div id="legalBody" style="font-size:11px;color:#61758a;line-height:1.8"></div></div></div>
+<div class="modal-bg" id="successModal"><div class="modal" style="text-align:center"><div style="width:64px;height:64px;border-radius:21px;margin:auto;display:grid;place-items:center;color:white;font-size:26px;background:linear-gradient(145deg,var(--purple),var(--cyan))">✓</div><h3 style="margin-top:14px">Payment submitted</h3><p>Your order is under review. A production backend would alert the operator immediately.</p><button class="btn primary full" onclick="closeModal('successModal');showDashPage('orders')">View order</button></div></div>
+<script>
+const $=id=>document.getElementById(id);
+let app={token:localStorage.getItem('loktron_token')||'',user:null,config:null,orders:[],tickets:[],notifications:[],wallet:'',orderFilter:'all',proof:null};
+const money=n=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(Number(n||0));
+const num=n=>new Intl.NumberFormat('en-IN',{maximumFractionDigits:2}).format(Number(n||0));
+
+function toast(message,type='success'){const s=$('toastStack');if(!s)return;const n=document.createElement('div');n.className='toast '+type;n.textContent=message;s.appendChild(n);setTimeout(()=>n.remove(),3400)}
+function showModal(id){$(id)?.classList.add('show')}function closeModal(id){$(id)?.classList.remove('show')}
+function toggleFaq(el){el.parentElement.classList.toggle('open')}
+async function api(path,options={}){const h={'Content-Type':'application/json',...(options.headers||{})};if(app.token)h.Authorization='Bearer '+app.token;const r=await fetch('/api'+path,{...options,headers:h});let data={};try{data=await r.json()}catch{}if(!r.ok){if(r.status===401){app.token='';localStorage.removeItem('loktron_token')}throw new Error(data.error||'Request failed')}return data}
+async function loadConfig(){try{app.config=await api('/config');$('apiStatus')&&($('apiStatus').textContent='Server connected');applyConfig()}catch(e){$('apiStatus')&&($('apiStatus').textContent='Connection issue');toast(e.message,'error')}}
+function applyConfig(){if(!app.config)return;const r=Number(app.config.rate||112.4);const rd=$('rateDisplay');if(rd)rd.value=`₹${r.toFixed(2)} / USDT`;[['bankName','bank'],['bankAccountName','accountName'],['bankAccountNumber','accountNumber'],['bankIfsc','ifsc'],['bankTransferTypes','transferTypes']].forEach(([id,k])=>{if($(id))$(id).textContent=app.config.bank?.[k]||'—'});const hero=[...document.querySelectorAll('.ratebig')][0];if(hero)hero.textContent='₹'+r.toFixed(2);calcBuy()}
+function openLogin(){if(app.token){openDashboard();return}showModal('loginModal')}
