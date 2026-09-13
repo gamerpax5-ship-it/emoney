@@ -1048,11 +1048,13 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
-    if (url.pathname === '/health') {
+    if (url.pathname === '/health' || url.pathname === '/ready') {
       const persistenceConfigured = !!(process.env.LOKTRON_SUPABASE_URL && process.env.LOKTRON_SUPABASE_KEY && process.env.LOKTRON_PERSISTENCE_SECRET);
       const ready = auditHealthy() && (!production || (!!process.env.SESSION_SECRET && adminConfigured && persistenceConfigured && tronVerifyMode === 'required'));
-      return send(res, ready ? 200 : 503, {
-        ok: ready,
+      const strict = url.pathname === '/ready';
+      return send(res, strict && !ready ? 503 : 200, {
+        ok: true,
+        ready,
         service: 'loktron-web',
         api: true,
         auth: 'signed-cookie-session',
@@ -1061,7 +1063,14 @@ const server = http.createServer(async (req, res) => {
         productionConfiguration: production ? (ready ? 'ready' : 'incomplete') : 'development',
         adminMfa: adminUsers.some(item => item.mfaCode) ? 'enabled' : 'not-configured',
         alerting: alertWebhookUrl ? 'enabled' : 'not-configured',
-        bankLedgerEntries: db.bankLedger.length
+        bankLedgerEntries: db.bankLedger.length,
+        checks: {
+          sessionSecret: !!process.env.SESSION_SECRET,
+          adminConfigured,
+          persistenceConfigured,
+          tronRequired: tronVerifyMode === 'required',
+          auditHealthy: auditHealthy()
+        }
       });
     }
 
