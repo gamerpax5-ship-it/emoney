@@ -21,6 +21,9 @@ const defaultData={
 };
 let db=await loadDb();
 const sessions=new Map();
+const adminSessions=new Set();
+const adminEmail=String(process.env.ADMIN_EMAIL||'admin@loktron.local').toLowerCase();
+const adminPassword=String(process.env.ADMIN_PASSWORD||'ChangeMe-LOKTRON-2026');
 function hash(v){return createHash('sha256').update(String(v)).digest('hex')}
 async function loadDb(){try{return JSON.parse(await readFile(dataFile,'utf8'))}catch{return structuredClone(defaultData)}}
 async function persist(){try{await writeFile(dataFile,JSON.stringify(db,null,2),'utf8')}catch(e){console.error('persist failed',e.message)}}
@@ -28,6 +31,7 @@ function send(res,status,data,extra={}){res.writeHead(status,{'Content-Type':'ap
 async function body(req,limit=4*1024*1024){const chunks=[];let n=0;for await(const c of req){n+=c.length;if(n>limit)throw Object.assign(new Error('Payload too large'),{status:413});chunks.push(c)}if(!chunks.length)return{};try{return JSON.parse(Buffer.concat(chunks).toString('utf8'))}catch{throw Object.assign(new Error('Invalid JSON'),{status:400})}}
 function bearer(req){const h=req.headers.authorization||'';return h.startsWith('Bearer ')?h.slice(7):''}
 function auth(req){const token=bearer(req),uid=sessions.get(token);if(!uid)throw Object.assign(new Error('Please login again'),{status:401});const user=db.users.find(u=>u.id===uid);if(!user)throw Object.assign(new Error('User not found'),{status:401});return{token,user}}
+function adminAuth(req){const token=bearer(req);if(!adminSessions.has(token))throw Object.assign(new Error('Admin authentication required'),{status:401});return token}
 function publicUser(u){return{id:u.id,email:u.email,name:u.name,mobile:u.mobile||'',currency:u.currency||'INR',wallet:u.wallet||'',createdAt:u.createdAt}}
 function userData(u){return{user:publicUser(u),orders:db.orders.filter(o=>o.userId===u.id).sort((a,b)=>b.date-a.date),tickets:db.tickets.filter(t=>t.userId===u.id).sort((a,b)=>b.createdAt-a.createdAt),notifications:db.notifications.filter(n=>n.userId===u.id).slice(0,30)}}
 function safeEmail(v){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)}
@@ -37,6 +41,27 @@ function headers(type){return{'Content-Type':type,'X-Content-Type-Options':'nosn
 
 async function api(req,res,path){
  if(req.method==='GET'&&path==='/config')return send(res,200,db.config);
+ if(req.method==='POST'&&path==='/admin/login'){
+  const b=await body(req),email=String(b.email||'').trim().toLowerCase(),password=String(b.password||'');
+  if(email!==adminEmail||password!==adminPassword)return send(res,401,{error:'Invalid admin credentials'});
+  const token=randomBytes(32).toString('hex');adminSessions.add(token);return send(res,200,{token});
+ }
+ if(req.method==='POST'&&path==='/admin/logout'){const t=adminAuth(req);adminSessions.delete(t);return send(res,200,{ok:true})}
+ if(req.method==='GET'&&path==='/admin/overview'){adminAuth(req);return send(res,200,{config:db.config,orders:db.orders,tickets:db.tickets,users:db.users.map(publicUser)})}
+ if(req.method==='PATCH'&&path==='/admin/config'){
+  adminAuth(req);const b=await body(req);const rate=Number(b.rate);if(!Number.isFinite(rate)||rate<=0)return send(res,400,{error:'Invalid rate'});
+  db.config.rate=rate;db.config.minInr=Math.max(1,Number(b.minInr||db.config.minInr));
+  const bank=b.bank||{};for(const k of ['bank','accountName','accountNumber','ifsc','transferTypes'])if(String(bank[k]||'').trim())db.config.bank[k]=String(bank[k]).trim().slice(0,120);
+  await persist();return send(res,200,{config:db.config});
+ }
+ if(req.method==='PATCH'&&/^\/admin\/orders\/[A-Za-z0-9-]+$/.test(path)){
+  adminAuth(req);const id=path.split('/').pop(),b=await body(req),o=db.orders.find(x=>x.id===id);if(!o)return send(res,404,{error:'Order not found'});
+  const status=String(b.status||'');if(!['Under Review','USDT Sent','Rejected'].includes(status))return send(res,400,{error:'Invalid status'});o.status=status;o.updatedAt=Date.now();
+  const title=status==='USDT Sent'?'USDT sent':status==='Rejected'?'Order needs attention':'Order under review';db.notifications.unshift({id:randomUUID(),userId:o.userId,title,text:`${o.id} status changed to ${status}.`,time:'Just now'});await persist();return send(res,200,{order:o});
+ }
+ if(req.method==='PATCH'&&/^\/admin\/tickets\/[A-Za-z0-9-]+$/.test(path)){
+  adminAuth(req);const id=path.split('/').pop(),b=await body(req),t=db.tickets.find(x=>x.id===id);if(!t)return send(res,404,{error:'Ticket not found'});t.status=String(b.status||'Closed').slice(0,30);await persist();return send(res,200,{ticket:t});
+ }
  if(req.method==='POST'&&path==='/auth/login'){
   const b=await body(req),email=String(b.email||'').trim().toLowerCase(),password=String(b.password||'');
   const u=db.users.find(x=>x.email===email&&x.passwordHash===hash(password));if(!u)return send(res,401,{error:'Invalid email or password'});
