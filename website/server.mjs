@@ -364,6 +364,19 @@ function auditHealthy() {
   return true;
 }
 
+function rebuildAuditChain(reason) {
+  let previous = 'GENESIS';
+  for (const existing of db.auditLog) {
+    const legacyHash = existing.hash || '';
+    delete existing.hash;
+    existing.previous = previous;
+    if (legacyHash && !existing.legacyHash) existing.legacyHash = legacyHash;
+    existing.hash = createHash('sha256').update(previous + '|' + JSON.stringify(existing)).digest('hex');
+    previous = existing.hash;
+  }
+  appendAudit({ actorType: 'system', actorId: 'server', action: 'audit.repaired', entityType: 'audit-log', entityId: 'runtime', details: { reason } });
+}
+
 function parseAdminUsers() {
   const raw = String(process.env.ADMIN_USERS || '').trim();
   if (raw) {
@@ -624,6 +637,12 @@ function backupSnapshot() {
     notifications: db.notifications,
     auditLog: db.auditLog
   };
+}
+
+if (!auditHealthy() && String(process.env.AUDIT_REPAIR_ON_BOOT || '').toLowerCase() === 'true') {
+  rebuildAuditChain('AUDIT_REPAIR_ON_BOOT');
+  await persist();
+  console.warn('Audit chain was rebuilt because AUDIT_REPAIR_ON_BOOT=true');
 }
 
 function headers(type) {
