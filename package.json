@@ -7,7 +7,9 @@
     "prepare-assets": "node scripts/prepare-assets.mjs",
     "prepare-website": "node website/assemble-src.mjs",
     "start": "node website/assemble-src.mjs && node website/persistent-start.mjs",
-    "serve": "node website/persistent-start.mjs"
+    "serve": "node website/persistent-start.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:website": "node --test tests/website-flow.test.mjs"
   },
   "engines": {
     "node": ">=20"

@@ -1,9 +1,9 @@
 # TRONPAY / LOKTRON
 
-This repository contains the two approved front-end products:
+This repository contains the LOKTRON web platform and digiRupee Android client:
 
-- **`android/`** — buildable Android WebView APK project bundling the approved WTRON P2P mobile HTML UI and its local application logic.
-- **`website/`** — the approved LOKTRON premium-wave website and buyer dashboard.
+- **`website/`** — the approved LOKTRON premium-wave website, buyer dashboard, authenticated API and operations console.
+- **`android/`** — the digiRupee Android client project.
 
 ## Website
 
@@ -12,6 +12,36 @@ npm start
 ```
 
 Open `http://localhost:3000`. Health check: `GET /health`.
+
+Admin console: `http://localhost:3000/admin.html`.
+
+The implemented server flow includes:
+
+- signed HttpOnly user sessions and scrypt password hashes;
+- server-owned rates, bank details, wallets and order calculations;
+- idempotent order submission and duplicate UTR protection;
+- private payment-proof access for authenticated administrators;
+- controlled `Under Review → Payment Verified → USDT Sent` transitions;
+- a unique confirmed TRON USDT transaction matching the exact wallet and amount before completion in production;
+- tamper-evident chained audit events, request limits and same-origin checks;
+- optional Supabase-backed runtime persistence.
+
+Production environment variables:
+
+```text
+NODE_ENV=production
+SESSION_SECRET=<long random secret>
+ADMIN_EMAIL=<private admin email>
+ADMIN_PASSWORD=<strong secret>  # or ADMIN_PASSWORD_HASH=<scrypt$...>
+PUBLIC_ORIGIN=https://your-domain.example
+LOKTRON_SUPABASE_URL=<project URL>
+LOKTRON_SUPABASE_KEY=<server-only secret/service key>
+LOKTRON_PERSISTENCE_SECRET=<long random persistence secret>
+TRON_VERIFY_MODE=required
+TRONGRID_API_KEY=<recommended TronGrid server key>
+```
+
+Never expose `LOKTRON_SUPABASE_KEY` to browser or Android code. The `/health` route returns `503` in production when a required production setting is missing.
 
 The same site can also be opened directly from `website/index.html`, but serving it through HTTP is recommended.
 
@@ -28,4 +58,4 @@ from `.github/workflows/android-apk.yml`.
 
 ## Important production note
 
-The current approved HTML products contain prototype/local browser state for user/order/reward data. Real authentication, administrator alerts, bank verification, user balances, reward authorization, blockchain monitoring, rate management, and irreversible payment/crypto settlement must be moved to an authenticated server/API before handling real funds. Do not treat browser `localStorage` as a production ledger.
+The browser is no longer the source of truth for user, wallet or order state. Bank receipt verification is an explicit manual administrator action. In production, a confirmed TRON USDT transfer must match the order's contract, destination wallet and exact amount before completion. Direct bank API verification, automated wallet signing, MFA, private Supabase Storage and full reconciliation/alerting are still separate production integrations; see `docs/PRODUCTION_CHECKLIST.md`.

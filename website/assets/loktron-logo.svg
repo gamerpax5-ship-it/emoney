@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 170" role="img" aria-labelledby="title desc">
+  <title id="title">LOKTRON</title>
+  <desc id="desc">LOKTRON digital asset purchase platform</desc>
+  <defs>
+    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#b997ff"/>
+      <stop offset=".48" stop-color="#7654ff"/>
+      <stop offset="1" stop-color="#27d1e5"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <g transform="translate(10 12)">
+    <rect x="0" y="0" width="144" height="144" rx="42" fill="#0c0a17" stroke="url(#mark)" stroke-width="4"/>
+    <path d="M36 32h31v50c0 15 8 24 25 27l17 3-13 22-13-2c-31-6-47-23-47-52z" fill="url(#mark)" filter="url(#glow)"/>
+    <path d="M76 30h40l-14 24H76zm0 38h31L93 92H76z" fill="#f7f5ff"/>
+    <circle cx="115" cy="113" r="8" fill="#27d1e5"/>
+  </g>
+  <text x="182" y="103" fill="#f8f7ff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="78" font-weight="850" letter-spacing="7">LOKTRON</text>
+  <text x="187" y="137" fill="#a7a2bb" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="600" letter-spacing="5">DIGITAL ASSET PURCHASE</text>
+</svg>

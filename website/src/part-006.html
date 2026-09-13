@@ -1,5 +1,5 @@
 .dash-welcome{position:relative;overflow:hidden;display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:16px;padding:24px 26px;border-radius:22px;background:linear-gradient(110deg,rgba(80,43,171,.86),rgba(28,16,63,.86) 60%,rgba(10,53,72,.82));border:1px solid rgba(175,139,255,.20);box-shadow:inset 0 1px 0 rgba(255,255,255,.10),0 20px 46px rgba(0,0,0,.28)}
-.dash-welcome:after{content:"";position:absolute;right:-5%;top:-70%;width:54%;height:230%;background-image:url("assets/loktron-wave.png");background-size:cover;background-position:center;opacity:.28;filter:saturate(1.25);transform:rotate(-5deg);animation:welcomeWave 13s ease-in-out infinite alternate;mask-image:linear-gradient(90deg,transparent,#000 35%)}
+.dash-welcome:after{content:"";position:absolute;right:-5%;top:-70%;width:54%;height:230%;background-image:url("assets/loktron-wave.svg");background-size:cover;background-position:center;opacity:.28;filter:saturate(1.25);transform:rotate(-5deg);animation:welcomeWave 13s ease-in-out infinite alternate;mask-image:linear-gradient(90deg,transparent,#000 35%)}
 @keyframes welcomeWave{0%{transform:translateX(-2%) rotate(-5deg) scale(1.05)}100%{transform:translateX(3%) translateY(-10px) rotate(-2deg) scale(1.1)}}
 .dash-welcome-copy,.dash-welcome-meta{position:relative;z-index:2}
 .dash-welcome-copy span{font-size:10px;letter-spacing:.14em;font-weight:650;color:#cbb9ff}
@@ -39,7 +39,7 @@
 <!-- PUBLIC LANDING -->
 <header class="topnav">
 <div class="wrap navin">
-<a class="brand" href="#home"><img alt="LOKTRON — USDT Purchase Platform" class="loktron-wordmark" src="assets/loktron-logo.webp"/></a>
+<a class="brand" href="#home"><img alt="LOKTRON — USDT Purchase Platform" class="loktron-wordmark" src="assets/loktron-logo.svg"/></a>
 <nav class="navlinks"><a href="#features">Features</a><a href="#how">How it works</a><a href="#currencies">Currencies</a><a href="#faq">FAQ</a><a href="#legal">Legal</a></nav>
 <div class="actions"><button class="btn secondary" onclick="openLogin()">Login</button><button class="btn primary" onclick="openLogin(true)">Buy USDT</button></div>
 </div>
