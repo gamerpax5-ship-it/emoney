@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "prepare-assets": "node scripts/prepare-assets.mjs",
-    "prepare-website": "node website/prepare.mjs",
-    "start": "node website/server.mjs",
+    "prepare-website": "node website/assemble-src.mjs",
+    "start": "node website/assemble-src.mjs && node website/server.mjs",
     "serve": "node website/server.mjs"
   },
   "engines": {
