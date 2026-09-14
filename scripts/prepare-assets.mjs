@@ -8,6 +8,7 @@ const webAppUrl = configuredWebAppUrl.endsWith('.html') ? configuredWebAppUrl : 
 const uploadedWtron = process.env.WTRON_ANDROID_HTML || '';
 const canonicalAppJs = join(root, 'ui/digirupee-app.js');
 const canonicalQrJs = join(root, 'ui/digirupee-qr.js');
+const canonicalRewardsJs = join(root, 'ui/digirupee-rewards.js');
 
 async function exists(path) {
   try {
@@ -33,6 +34,21 @@ function replaceOverlay(source, id, replacement) {
   throw new Error(`Could not replace overlay ${id}`);
 }
 
+function extractPngDataUrl(source, name) {
+  const pattern = new RegExp(`const\\s+${name}\\s*=\\s*['\"](data:image\\/png;base64,[A-Za-z0-9+/=]+)['\"]`);
+  return source.match(pattern)?.[1] || '';
+}
+
+function rewardAssetsFrom(source) {
+  const assets = {
+    content: extractPngDataUrl(source, 'CONTENT') || extractPngDataUrl(source, 'ART'),
+    nav: extractPngDataUrl(source, 'NAV'),
+    wheel: extractPngDataUrl(source, 'WHEEL') || extractPngDataUrl(source, 'SEG')
+  };
+  if (!assets.content || !assets.nav || !assets.wheel) throw new Error('Approved Rewards artwork assets are missing from WTRON source');
+  return assets;
+}
+
 function productionHtml(source) {
   let html = source.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   html = html.replace(/<title>[\s\S]*?<\/title>/i, '<title>digiRupee — Sell USDT</title>');
@@ -50,7 +66,7 @@ function productionHtml(source) {
   html = html.replace(/₹108\.00/g, '—');
   html = replaceOverlay(html, 'sessionsOv', '<div class="overlay" id="sessionsOv" onclick="bg(event,\'sessionsOv\')"><div class="sheet"><div class="handle"></div><h3>Login & Devices</h3><p class="desc">Loading active sessions…</p></div></div>');
   html = replaceOverlay(html, 'supportOv', '<div class="overlay" id="supportOv" onclick="bg(event,\'supportOv\')"><div class="sheet"><div class="handle"></div><h3>Help & Support</h3><p class="desc">Loading your support tickets…</p></div></div>');
-  html = html.replace(/<\/body>/i, '<script src="/digirupee-qr.js" defer></script><script src="/digirupee-app.js" defer></script></body>');
+  html = html.replace(/<\/body>/i, '<script src="/digirupee-qr.js" defer></script><script src="/digirupee-app.js" defer></script><script src="/digirupee-rewards-assets.js" defer></script><script src="/digirupee-rewards.js" defer></script></body>');
   return html;
 }
 
@@ -69,16 +85,24 @@ async function rebuildAndroid() {
   } else {
     throw new Error('WTRON Android HTML asset is missing');
   }
+
+  const rewardAssets = rewardAssetsFrom(sourceHtml);
   const hostedHtml = join(root, 'website/digirupee-app.html');
   const hostedJs = join(root, 'website/digirupee-app.js');
   const hostedQrJs = join(root, 'website/digirupee-qr.js');
+  const hostedRewardsJs = join(root, 'website/digirupee-rewards.js');
+  const hostedRewardsAssetsJs = join(root, 'website/digirupee-rewards-assets.js');
+
   await writeFile(hostedHtml, productionHtml(sourceHtml), 'utf8');
   await copyFile(canonicalAppJs, hostedJs);
   await copyFile(canonicalQrJs, hostedQrJs);
+  await copyFile(canonicalRewardsJs, hostedRewardsJs);
+  await writeFile(hostedRewardsAssetsJs, `window.__DIGIRUPEE_REWARD_ASSETS=${JSON.stringify(rewardAssets)};\n`, 'utf8');
+
   const fallback = join(assetDir, 'offline.html');
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>digiRupee</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#070512;color:#fff;font:16px Arial,sans-serif}.box{max-width:340px;padding:24px;text-align:center}p{color:#c9c4df;line-height:1.5}button{border:0;border-radius:9px;padding:13px 18px;background:#7c4dff;color:#fff;font-weight:700}</style></head><body><div class="box"><h1>digiRupee</h1><p>An internet connection is required to use the secure application.</p><button onclick="location.href='${webAppUrl.replace(/'/g, '%27')}'">Retry</button></div></body></html>`;
   await writeFile(fallback, html);
-  return { hostedHtml, hostedJs, hostedQrJs, fallback, webAppUrl, bytes: Buffer.byteLength(sourceHtml) };
+  return { hostedHtml, hostedJs, hostedQrJs, hostedRewardsJs, hostedRewardsAssetsJs, fallback, webAppUrl, bytes: Buffer.byteLength(sourceHtml) };
 }
 
 const android = await rebuildAndroid();
