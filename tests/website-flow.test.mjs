@@ -85,7 +85,16 @@ test('complete user, verification and settlement flow', async t => {
     body: JSON.stringify({ email: 'buyer@example.com', name: 'Test Buyer', password: 'Buyer-Password-2026' })
   });
   assert.equal(registered.response.status, 201);
-  const cookie = registered.response.headers.get('set-cookie').split(';')[0];
+  assert.equal(registered.payload.loginRequired, true);
+  assert.equal(registered.response.headers.get('set-cookie'), null);
+
+  const userLogin = await request('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'buyer@example.com', password: 'Buyer-Password-2026' })
+  });
+  assert.equal(userLogin.response.status, 200);
+  const cookie = userLogin.response.headers.get('set-cookie').split(';')[0];
 
   const crossSite = await request('/api/auth/register', {
     method: 'POST',
@@ -144,6 +153,40 @@ test('complete user, verification and settlement flow', async t => {
   });
   assert.equal(adminLogin.response.status, 200);
   const adminHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${adminLogin.payload.token}` };
+
+  const configUpdate = await request('/api/admin/config', {
+    method: 'PATCH',
+    headers: adminHeaders,
+    body: JSON.stringify({
+      rate: 102,
+      minInr: 1000,
+      maxInr: 500000,
+      paymentMode: 'IMPS / NEFT',
+      support: { label: 'Online', telegram: '@loktron_support', note: 'Telegram support available' },
+      bank: {
+        bank: 'Test Bank',
+        accountName: 'LOKTRON TEST',
+        accountNumber: '1234567890',
+        ifsc: 'TEST0001234',
+        transferTypes: 'IMPS / NEFT'
+      },
+      currencies: [
+        { code: 'INR', name: 'Indian Rupee', symbol: '₹', status: 'live', note: 'INR live' },
+        { code: 'USD', name: 'US Dollar', symbol: '$', status: 'coming-soon', note: 'Coming soon' }
+      ]
+    })
+  });
+  assert.equal(configUpdate.response.status, 200);
+  assert.equal(configUpdate.payload.config.rate, 102);
+  assert.equal(configUpdate.payload.config.maxInr, 500000);
+  assert.equal(configUpdate.payload.config.support.telegram, '@loktron_support');
+
+  const overMax = await request('/api/orders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie, 'Idempotency-Key': 'test-order-key-overmax123' },
+    body: JSON.stringify({ inr: 500001, paid: 500001, utr: 'UTROVERMAX123', proof: { type: 'image/png', data: png } })
+  });
+  assert.equal(overMax.response.status, 400);
 
   const ledgerImport = await request('/api/admin/bank-ledger/import', {
     method: 'POST',

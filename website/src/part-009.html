@@ -1,6 +1,7 @@
 <div class="hidden" id="walletSaved"><div id="walletText" style="padding:13px;border-radius:13px;background:#f3f7fb;border:1px solid #dde6ef;word-break:break-all;font-size:10px"></div><button class="btn secondary" onclick="editWallet()" style="margin-top:9px">Change wallet</button></div>
 </div>
 <div class="panel"><div class="panel-head"><h3>Wallet checklist</h3></div><div class="notice">• Use the supported USDT network only.<br/>• Verify the complete address before saving.<br/>• Submitted orders should retain their original destination.<br/>• Contact support before fulfilment if you spot an address problem.</div></div>
+<div class="panel"><div class="panel-head"><h3>USDT received history</h3><span id="walletReceivedTotal">0 USDT</span></div><div id="walletHistory"></div></div>
 </div>
 </section>
 <section class="dash-page" id="account">
@@ -35,7 +36,8 @@
 </div>
 <div class="dashboard-grid">
 <div class="panel panel-3d">
-<div class="panel-head"><h3>Support</h3><span>Payment, UTR or wallet help</span></div>
+<div class="panel-head"><h3>Support</h3><span id="supportPanelStatus">Payment, UTR or wallet help</span></div>
+<div class="notice" id="supportContact" style="margin-bottom:12px">Support details will appear here.</div>
 <div class="form-grid">
 <div><span class="label">Order ID</span><input class="input" id="supportOrder" placeholder="Optional"/></div>
 <div><span class="label">Issue type</span><select class="select" id="supportType"><option>Payment not reflected</option><option>Wrong UTR / proof</option><option>Wallet address issue</option><option>General support</option></select></div>
@@ -72,11 +74,11 @@
 <div class="modal-bg" id="loginModal"><div class="modal"><div class="modal-head"><div><h3 id="authTitle">Login to LOKTRON</h3><p id="authSubtitle">Secure access to your wallet, purchases and order history.</p></div><button class="x" onclick="closeModal('loginModal')">×</button></div>
 <div class="form-grid" style="margin:8px 0 14px"><button class="btn primary full" id="authLoginTab" onclick="toggleAuthMode('login')">Login</button><button class="btn secondary full" id="authRegisterTab" onclick="toggleAuthMode('register')">Create account</button></div>
 <div class="hidden" id="authNameWrap"><span class="label">Full name</span><input class="input" id="registerName" maxlength="80" placeholder="Your full name"/></div>
-<span class="label">Email</span><input autocomplete="email" class="input" id="loginId" placeholder="Email address" type="email" value="demo@loktron.com"/>
-<span class="label">Password</span><input autocomplete="current-password" class="input" id="loginPass" maxlength="128" placeholder="Password" type="password" value="12345678"/>
+<span class="label">Email</span><input autocomplete="email" class="input" id="loginId" placeholder="Email address" type="email"/>
+<span class="label">Password</span><input autocomplete="current-password" class="input" id="loginPass" maxlength="128" placeholder="Password" type="password"/>
 <div class="hidden" id="authConfirmWrap"><span class="label">Confirm password</span><input autocomplete="new-password" class="input" id="registerConfirm" maxlength="128" placeholder="Confirm password" type="password"/></div>
 <button class="btn primary full" id="authSubmit" onclick="submitAuth()" style="margin-top:12px">Login securely</button>
-<p id="demoNote" style="text-align:center">Demo account: demo@loktron.com / 12345678</p>
+<p id="demoNote" style="text-align:center">New user? Click Create account, then login after registration.</p>
 <p class="auth-security">Your session uses a secure HttpOnly cookie and automatically restores after refresh.</p></div></div>
 <div class="modal-bg" id="legalModal"><div class="modal"><div class="modal-head"><div><h3 id="legalTitle">Policy</h3><p id="legalIntro"></p></div><button class="x" onclick="closeModal('legalModal')">×</button></div><div id="legalBody" style="font-size:11px;color:#61758a;line-height:1.8"></div></div></div>
 <div class="modal-bg" id="successModal"><div class="modal" style="text-align:center"><div style="width:64px;height:64px;border-radius:21px;margin:auto;display:grid;place-items:center;color:white;font-size:26px;background:linear-gradient(145deg,var(--purple),var(--cyan))">✓</div><h3 style="margin-top:14px">Payment submitted</h3><p>Your order is under review and is now visible in the operations console.</p><button class="btn primary full" onclick="closeModal('successModal');showDashPage('orders')">View order</button></div></div>

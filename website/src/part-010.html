@@ -1,21 +1,398 @@
-async function submitAuth(){return app.authMode==='register'?registerAccount():login()}
-async function login(){const email=$('loginId').value.trim().toLowerCase(),password=$('loginPass').value;if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return toast('Enter a valid email address','error');if(!password)return toast('Enter your password','error');setAuthBusy(true);try{const d=await api('/auth/login',{method:'POST',body:JSON.stringify({email,password})});app.authenticated=true;app.user=d.user||null;closeModal('loginModal');toast('Login successful');await openDashboard(true)}catch(e){toast(e.message,'error')}finally{setAuthBusy(false)}}
-async function registerAccount(){const name=$('registerName').value.trim(),email=$('loginId').value.trim().toLowerCase(),password=$('loginPass').value,confirm=$('registerConfirm').value;if(name.length<2)return toast('Enter your full name','error');if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return toast('Enter a valid email address','error');if(password.length<8)return toast('Password must be at least 8 characters','error');if(password.length>128)return toast('Password is too long','error');if(password!==confirm)return toast('Passwords do not match','error');setAuthBusy(true);try{const d=await api('/auth/register',{method:'POST',body:JSON.stringify({email,password,name})});app.authenticated=true;app.user=d.user||null;closeModal('loginModal');toast('Account created');await openDashboard(true)}catch(e){toast(e.message,'error')}finally{setAuthBusy(false)}}
-async function logout(){try{await api('/auth/logout',{method:'POST'})}catch{}app.authenticated=false;app.user=null;app.wallet='';app.orders=[];app.tickets=[];app.notifications=[];$('dashboard').style.display='none';$('publicSite').style.display='block';document.querySelector('.topnav').style.display='block';window.scrollTo({top:0,behavior:'smooth'});toast('Logged out')}
-async function openDashboard(silent=false){try{await Promise.all([loadConfig(),refreshAccount()]);app.authenticated=true;$('publicSite').style.display='none';document.querySelector('.topnav').style.display='none';$('dashboard').style.display='block';showDashPage('overview');window.scrollTo(0,0);return true}catch(e){app.authenticated=false;$('dashboard').style.display='none';$('publicSite').style.display='block';document.querySelector('.topnav').style.display='block';if(!silent){if(e.status===401){toggleAuthMode('login');showModal('loginModal')}else toast(e.message,'error')}return false}}
-async function restoreSession(){return openDashboard(true)}
-async function refreshAccount(){const d=await api('/me');app.authenticated=true;app.user=d.user;app.wallet=d.user.wallet||'';app.orders=d.orders||[];app.tickets=d.tickets||[];app.notifications=d.notifications||[];renderAll();$('lastSync')&&($('lastSync').textContent='Synced '+new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}))}
-function showDashPage(id){if(!$(id))id='overview';document.querySelectorAll('.dash-page').forEach(p=>p.classList.remove('active'));$(id).classList.add('active');document.querySelectorAll('.side-link').forEach(x=>x.classList.toggle('active',x.dataset.page===id));$('dashTitle').textContent={overview:'Overview',buy:'Buy USDT',orders:'Orders',wallet:'Wallet',account:'Account'}[id]||id;if(id==='orders'||id==='overview')refreshAccount().catch(()=>{});window.scrollTo({top:0,behavior:'smooth'})}
-function calcBuy(){const r=Number(app.config?.rate||112.4),v=Number($('buyInr')?.value||0);if($('buyUsdt'))$('buyUsdt').textContent=num(v/r)+' USDT';if($('buySummary'))$('buySummary').innerHTML=v>0?`You pay <b>${money(v)}</b><br>You receive approximately <b>${num(v/r)} USDT</b><br>Rate: ₹${r.toFixed(2)} / USDT`:'Enter an INR amount to see the purchase summary.'}
-async function saveWallet(){const w=$('walletInput').value.trim();if(!/^T[1-9A-HJ-NP-Za-km-z]{25,40}$/.test(w))return toast('Enter a valid TRC20 address','error');try{await api('/wallet',{method:'PUT',body:JSON.stringify({wallet:w})});toast('Wallet saved');await refreshAccount();showDashPage('buy')}catch(e){toast(e.message,'error')}}
-function editWallet(){$('walletInput').value=app.wallet;app.wallet='';renderAll()}
-function proofChanged(){const f=$('proofInput').files[0];app.proof=null;if(!f){$('proofLabel').textContent='Upload payment screenshot';return}if(!/^image\//.test(f.type))return toast('Only image proof is allowed','error');if(f.size>2.5*1024*1024){$('proofInput').value='';return toast('Proof image must be under 2.5 MB','error')}const rd=new FileReader();rd.onload=()=>{app.proof={name:f.name,type:f.type,data:String(rd.result).split(',')[1]};$('proofLabel').textContent='Selected: '+f.name;let old=document.querySelector('.proof-preview');old&&old.remove();const p=document.createElement('div');p.className='proof-preview';p.innerHTML=`<img src="${rd.result}" alt="Payment proof preview"><span>${f.name}<br>${(f.size/1024).toFixed(0)} KB</span>`;$('proofInput').closest('.upload').insertAdjacentElement('afterend',p)};rd.readAsDataURL(f)}
-async function submitOrder(){if(!app.wallet)return toast('Save your wallet address first','error');const inr=Number($('buyInr').value||0),paid=Number($('paidAmount').value||0),utr=$('utr').value.trim(),minimum=Number(app.config?.minInr||1000);if(inr<minimum)return toast('Minimum purchase amount is '+money(minimum),'error');if(Math.abs(inr-paid)>1)return toast('Paid amount must match order amount','error');if(!/^[A-Za-z0-9-]{6,40}$/.test(utr))return toast('Enter a valid UTR / reference','error');if(!app.proof)return toast('Upload payment proof','error');const btn=document.querySelector('#buyArea .btn.primary.full');btn?.classList.add('loading');app.pendingOrderKey=app.pendingOrderKey||(crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2));try{const d=await api('/orders',{method:'POST',headers:{'Idempotency-Key':app.pendingOrderKey},body:JSON.stringify({inr,paid,utr,proof:app.proof})});app.pendingOrderKey='';toast('Payment submitted. Order '+d.order.id+' is under review');$('utr').value='';$('paidAmount').value='';$('proofInput').value='';$('proofLabel').textContent='Upload payment screenshot';document.querySelector('.proof-preview')?.remove();app.proof=null;await refreshAccount();showDashPage('orders')}catch(e){toast(e.message,'error')}finally{btn?.classList.remove('loading')}}
-function setOrderFilter(v,el){app.orderFilter=v;document.querySelectorAll('.filter-chip').forEach(x=>x.classList.toggle('active',x===el));renderOrders()}
-function orderBadge(o){return o.status==='USDT Sent'?'sent':o.status==='Payment Verified'?'verified':o.status==='Rejected'?'failed':'review'}
-function renderOrders(){const filtered=app.orderFilter==='all'?app.orders:app.orders.filter(o=>o.status===app.orderFilter);$('ordersTable').innerHTML=filtered.map(o=>`<tr><td><span class="order-id-link" onclick="openOrder('${o.id}')">${o.id}</span></td><td>${new Date(o.date).toLocaleDateString()}</td><td>${money(o.inr)}</td><td>${num(o.usdt)}</td><td>${escapeHtml(o.utr)}</td><td><span class="badge ${orderBadge(o)}">${o.status}</span></td></tr>`).join('')||'<tr><td colspan="6">No orders in this status.</td></tr>'}
-function openOrder(id){const o=app.orders.find(x=>x.id===id);if(!o)return;const settlement=o.settlement?.txId?`<div class="detail-box" style="grid-column:1/-1"><small>TRON TRANSACTION ID</small><b style="word-break:break-all">${escapeHtml(o.settlement.txId)}</b></div>`:'';const rejection=o.rejection?.reason?`<div class="detail-box" style="grid-column:1/-1"><small>REJECTION REASON</small><b>${escapeHtml(o.rejection.reason)}</b></div>`:'';const body=$('orderDetailBody');body.innerHTML=`<div class="detail-grid"><div class="detail-box"><small>ORDER ID</small><b>${o.id}</b></div><div class="detail-box"><small>STATUS</small><b>${o.status}</b></div><div class="detail-box"><small>INR PAID</small><b>${money(o.inr)}</b></div><div class="detail-box"><small>USDT ESTIMATE</small><b>${num(o.usdt)} USDT</b></div><div class="detail-box"><small>RATE</small><b>₹${Number(o.rate).toFixed(2)}</b></div><div class="detail-box"><small>UTR</small><b>${escapeHtml(o.utr)}</b></div><div class="detail-box" style="grid-column:1/-1"><small>RECEIVING WALLET</small><b>${escapeHtml(o.wallet)}</b></div>${settlement}${rejection}</div>`;showModal('orderDetailModal')}
-function escapeHtml(v=''){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
-async function saveProfile(){const payload={name:$('profileName').value.trim(),mobile:$('profileMobile').value.trim(),currency:$('profileCurrency').value};try{await api('/profile',{method:'PATCH',body:JSON.stringify(payload)});toast('Profile updated');await refreshAccount()}catch(e){toast(e.message,'error')}}
-async function submitSupport(){const text=$('supportMessage').value.trim(),type=$('supportType').value,orderId=$('supportOrder').value.trim();if(text.length<10)return toast('Please explain the issue in a little more detail','error');try{await api('/support',{method:'POST',body:JSON.stringify({type,text,orderId})});$('supportMessage').value='';$('supportOrder').value='';toast('Support ticket submitted');await refreshAccount()}catch(e){toast(e.message,'error')}}
-function renderAll(){const u=app.user||{},has=!!app.wallet;$('walletEmpty')?.classList.toggle('hidden',has);$('walletSaved')?.classList.toggle('hidden',!has);if(has)$('walletText').textContent=app.wallet;$('buyLock')?.classList.toggle('hidden',has);$('buyArea')?.classList.toggle('hidden',!has);if($('buyWalletDisplay'))$('buyWalletDisplay').textContent=has?app.wallet:'No wallet saved.';if($('kpiWallet'))$('kpiWallet').textContent=has?'Saved':'Not saved';if($('kpiOrders'))$('kpiOrders').textContent=app.orders.length;const completed=app.orders.filter(o=>o.status==='USDT Sent');if($('kpiUsdt'))$('kpiUsdt').textContent=num(completed.reduce((s,o)=>s+Number(o.usdt),0))+' USDT';if($('kpiInr'))$('kpiInr').textContent=money(app.orders.reduce((s,o)=>s+Number(o.inr),0));if($('orderCountMini'))$('orderCountMini').textContent=app.orders.length;if($('reviewCountMini'))$('reviewCountMini').textContent=app.orders.filter(o=>['Under Review','Payment Verified'].includes(o.status)).length;if($('completedCountMini'))$('completedCountMini').textContent=completed.length;
+async function submitAuth() {
+  return app.authMode === 'register' ? registerAccount() : login();
+}
+
+async function login() {
+  const email = $('loginId').value.trim().toLowerCase();
+  const password = $('loginPass').value;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast('Enter a valid email address', 'error');
+  if (!password) return toast('Enter your password', 'error');
+  setAuthBusy(true);
+  try {
+    const d = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+    app.authenticated = true;
+    app.user = d.user || null;
+    closeModal('loginModal');
+    toast('Login successful');
+    await openDashboard(true);
+  } catch (e) {
+    if (e.status === 401) {
+      toast('Account not found or password wrong. New user? Use Create account first.', 'error');
+    } else {
+      toast(e.message, 'error');
+    }
+  } finally {
+    setAuthBusy(false);
+  }
+}
+
+async function registerAccount() {
+  const name = $('registerName').value.trim();
+  const email = $('loginId').value.trim().toLowerCase();
+  const password = $('loginPass').value;
+  const confirm = $('registerConfirm').value;
+  if (name.length < 2) return toast('Enter your full name', 'error');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast('Enter a valid email address', 'error');
+  if (password.length < 8) return toast('Password must be at least 8 characters', 'error');
+  if (password.length > 128) return toast('Password is too long', 'error');
+  if (password !== confirm) return toast('Passwords do not match', 'error');
+  setAuthBusy(true);
+  try {
+    await api('/auth/register', { method: 'POST', body: JSON.stringify({ email, password, name }) });
+    toggleAuthMode('login');
+    $('loginId').value = email;
+    $('loginPass').value = '';
+    $('registerConfirm').value = '';
+    toast('Account created. Please login now.');
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    setAuthBusy(false);
+  }
+}
+
+async function logout() {
+  try { await api('/auth/logout', { method: 'POST' }); } catch {}
+  app.authenticated = false;
+  app.user = null;
+  app.wallet = '';
+  app.orders = [];
+  app.tickets = [];
+  app.notifications = [];
+  $('dashboard').style.display = 'none';
+  $('publicSite').style.display = 'block';
+  document.querySelector('.topnav').style.display = 'block';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  toast('Logged out');
+}
+
+async function openDashboard(silent = false) {
+  try {
+    await Promise.all([loadConfig(), refreshAccount()]);
+    app.authenticated = true;
+    $('publicSite').style.display = 'none';
+    document.querySelector('.topnav').style.display = 'none';
+    $('dashboard').style.display = 'block';
+    showDashPage('overview');
+    window.scrollTo(0, 0);
+    return true;
+  } catch (e) {
+    app.authenticated = false;
+    $('dashboard').style.display = 'none';
+    $('publicSite').style.display = 'block';
+    document.querySelector('.topnav').style.display = 'block';
+    if (!silent) {
+      if (e.status === 401) {
+        toggleAuthMode('login');
+        showModal('loginModal');
+      } else {
+        toast(e.message, 'error');
+      }
+    }
+    return false;
+  }
+}
+
+async function restoreSession() {
+  return openDashboard(true);
+}
+
+async function refreshAccount() {
+  const d = await api('/me');
+  app.authenticated = true;
+  app.user = d.user;
+  app.wallet = d.user.wallet || '';
+  app.orders = d.orders || [];
+  app.tickets = d.tickets || [];
+  app.notifications = d.notifications || [];
+  renderAll();
+  $('lastSync') && ($('lastSync').textContent = 'Synced ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+}
+
+function showDashPage(id) {
+  if (!$(id)) id = 'overview';
+  document.querySelectorAll('.dash-page').forEach(p => p.classList.remove('active'));
+  $(id).classList.add('active');
+  document.querySelectorAll('.side-link').forEach(x => x.classList.toggle('active', x.dataset.page === id));
+  $('dashTitle').textContent = { overview: 'Overview', buy: 'Buy USDT', orders: 'Orders', wallet: 'Wallet', account: 'Account' }[id] || id;
+  if (id === 'orders' || id === 'overview' || id === 'wallet') refreshAccount().catch(() => {});
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function formatRate() {
+  const r = Number(app.config?.rate || 0);
+  return r > 0 ? `₹${r.toFixed(2)}` : 'Loading';
+}
+
+function formatLimitRange() {
+  const min = Number(app.config?.minInr || 0);
+  const max = Number(app.config?.maxInr || 0);
+  return `${money(min)} to ${money(max)}`;
+}
+
+function renderCurrencies() {
+  const rows = Array.isArray(app.config?.currencies) ? app.config.currencies : [];
+  const live = rows.filter(x => x.status === 'live').map(x => x.code).join(', ') || 'INR';
+  const soon = rows.filter(x => x.status !== 'live').map(x => x.code).join(', ') || 'more currencies';
+  if ($('currencyNotice')) $('currencyNotice').textContent = `${live} is currently live. ${soon} are marked Coming Soon.`;
+  const grid = $('currencyGrid');
+  if (!grid || !rows.length) return;
+  grid.innerHTML = rows.map(c => `
+    <div class="currency">
+      <div class="currency-top"><div class="currency-icon">${escapeHtml(c.symbol || c.code.slice(0, 1))}</div><span class="statuspill ${c.status === 'live' ? 'live' : 'soon'}">${c.status === 'live' ? 'LIVE' : 'COMING SOON'}</span></div>
+      <h3>${escapeHtml(c.code)} — ${escapeHtml(c.name)}</h3>
+      <p>${escapeHtml(c.note || 'This rail will appear when activated.')}</p>
+    </div>`).join('');
+  const select = $('profileCurrency');
+  if (select) {
+    const current = select.value || app.user?.currency || 'INR';
+    const liveRows = rows.filter(c => c.status === 'live');
+    select.innerHTML = (liveRows.length ? liveRows : [{ code: 'INR' }]).map(c => `<option value="${escapeHtml(c.code)}" ${c.code === current ? 'selected' : ''}>${escapeHtml(c.code)}</option>`).join('');
+  }
+}
+
+function applyConfig() {
+  if (!app.config) return;
+  const r = Number(app.config.rate || 112.4);
+  const support = app.config.support || {};
+  if ($('rateDisplay')) $('rateDisplay').value = `${formatRate()} / USDT`;
+  if ($('overviewRate')) $('overviewRate').textContent = formatRate();
+  if ($('landingRate')) $('landingRate').textContent = `${formatRate()} / USDT`;
+  document.querySelectorAll('.ratebig').forEach(x => { x.textContent = formatRate(); });
+  if ($('overviewSupport')) $('overviewSupport').textContent = support.label || 'Online';
+  if ($('landingSupport')) $('landingSupport').textContent = support.label || 'Online';
+  if ($('overviewSupportText')) $('overviewSupportText').textContent = support.telegram ? `${support.telegram} support available` : (support.note || 'Payment, wallet or UTR help');
+  if ($('supportPanelStatus')) $('supportPanelStatus').textContent = support.label || 'Payment, UTR or wallet help';
+  if ($('supportContact')) {
+    const telegram = support.telegram ? `<br><b>Telegram:</b> ${escapeHtml(support.telegram)}` : '';
+    $('supportContact').innerHTML = `${escapeHtml(support.note || 'Payment, wallet and UTR support is available.')}${telegram}`;
+  }
+  if ($('networkDisplay')) $('networkDisplay').textContent = app.config.network || 'TRC20';
+  if ($('paymentModeDisplay')) $('paymentModeDisplay').textContent = app.config.paymentMode || app.config.bank?.transferTypes || 'IMPS / NEFT / RTGS';
+  if ($('limitNotice')) $('limitNotice').textContent = `Order limit: ${formatLimitRange()}. The paid amount must match the order amount exactly.`;
+  if ($('payInstruction')) $('payInstruction').textContent = `Pay only the exact order amount to the bank details shown here using ${app.config.paymentMode || 'the listed payment mode'}.`;
+  [['bankName', 'bank'], ['bankAccountName', 'accountName'], ['bankAccountNumber', 'accountNumber'], ['bankIfsc', 'ifsc'], ['bankTransferTypes', 'transferTypes']].forEach(([id, k]) => {
+    if ($(id)) $(id).textContent = app.config.bank?.[k] || '—';
+  });
+  const amount = $('buyInr');
+  if (amount) {
+    amount.min = String(app.config.minInr || 1);
+    amount.max = String(app.config.maxInr || '');
+  }
+  const paid = $('paidAmount');
+  if (paid) paid.placeholder = String(amount?.value || app.config.minInr || 0);
+  renderCurrencies();
+  calcBuy(false);
+}
+
+function toggleAuthMode(mode = 'login') {
+  app.authMode = mode === 'register' ? 'register' : 'login';
+  const reg = app.authMode === 'register';
+  $('authTitle').textContent = reg ? 'Create your LOKTRON account' : 'Login to LOKTRON';
+  $('authSubtitle').textContent = reg ? 'Register first, then login to manage wallet and purchase history.' : 'Secure access to your wallet, purchases and order history.';
+  $('authNameWrap').classList.toggle('hidden', !reg);
+  $('authConfirmWrap').classList.toggle('hidden', !reg);
+  $('demoNote').textContent = reg ? 'After registration, login with the same email and password.' : 'New user? Click Create account, then login after registration.';
+  $('authLoginTab').className = 'btn ' + (reg ? 'secondary' : 'primary') + ' full';
+  $('authRegisterTab').className = 'btn ' + (reg ? 'primary' : 'secondary') + ' full';
+  $('authSubmit').textContent = reg ? 'Create account' : 'Login securely';
+  $('loginPass').setAttribute('autocomplete', reg ? 'new-password' : 'current-password');
+  if (!reg) $('registerConfirm').value = '';
+}
+
+function setAuthBusy(on) {
+  const b = $('authSubmit');
+  if (!b) return;
+  b.classList.toggle('loading', !!on);
+  b.disabled = !!on;
+}
+
+function openLogin(register = false) {
+  if (app.authenticated) {
+    openDashboard();
+    return;
+  }
+  toggleAuthMode(register === 'register' ? 'register' : 'login');
+  showModal('loginModal');
+}
+
+function calcBuy(syncPaid = false) {
+  const r = Number(app.config?.rate || 112.4);
+  const min = Number(app.config?.minInr || 1000);
+  const max = Number(app.config?.maxInr || 0);
+  const input = $('buyInr');
+  const v = Number(input?.value || 0);
+  if (syncPaid && $('paidAmount')) $('paidAmount').value = input?.value || '';
+  if ($('buyUsdt')) $('buyUsdt').textContent = v > 0 ? num(v / r) + ' USDT' : '0 USDT';
+  let warning = '';
+  if (v > 0 && v < min) warning = `<br><b style="color:#b34452">Amount is below minimum ${money(min)}.</b>`;
+  if (max && v > max) warning = `<br><b style="color:#b34452">Amount is above maximum ${money(max)}.</b>`;
+  if ($('buySummary')) {
+    $('buySummary').innerHTML = v > 0
+      ? `You pay <b>${money(v)}</b><br>You receive approximately <b>${num(v / r)} USDT</b><br>Rate: ${formatRate()} / USDT<br>Allowed range: <b>${formatLimitRange()}</b>${warning}`
+      : 'Enter an INR amount to see the purchase summary.';
+  }
+}
+
+async function saveWallet() {
+  const w = $('walletInput').value.trim();
+  if (!/^T[1-9A-HJ-NP-Za-km-z]{25,40}$/.test(w)) return toast('Enter a valid TRC20 address', 'error');
+  try {
+    await api('/wallet', { method: 'PUT', body: JSON.stringify({ wallet: w }) });
+    toast('Wallet saved');
+    await refreshAccount();
+    showDashPage('buy');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function editWallet() {
+  $('walletInput').value = app.wallet;
+  app.wallet = '';
+  renderAll();
+}
+
+function proofChanged() {
+  const f = $('proofInput').files[0];
+  app.proof = null;
+  if (!f) {
+    $('proofLabel').textContent = 'Upload payment screenshot';
+    return;
+  }
+  if (!/^image\//.test(f.type)) return toast('Only image proof is allowed', 'error');
+  if (f.size > 2.5 * 1024 * 1024) {
+    $('proofInput').value = '';
+    return toast('Proof image must be under 2.5 MB', 'error');
+  }
+  const rd = new FileReader();
+  rd.onload = () => {
+    app.proof = { name: f.name, type: f.type, data: String(rd.result).split(',')[1] };
+    $('proofLabel').textContent = 'Selected: ' + f.name;
+    document.querySelector('.proof-preview')?.remove();
+    const p = document.createElement('div');
+    p.className = 'proof-preview';
+    p.innerHTML = `<img src="${rd.result}" alt="Payment proof preview"><span>${f.name}<br>${(f.size / 1024).toFixed(0)} KB</span>`;
+    $('proofInput').closest('.upload').insertAdjacentElement('afterend', p);
+  };
+  rd.readAsDataURL(f);
+}
+
+async function submitOrder() {
+  if (!app.wallet) return toast('Save your wallet address first', 'error');
+  const inr = Number($('buyInr').value || 0);
+  const paid = Number($('paidAmount').value || 0);
+  const utr = $('utr').value.trim();
+  const minimum = Number(app.config?.minInr || 1000);
+  const maximum = Number(app.config?.maxInr || 0);
+  if (inr < minimum) return toast('Minimum purchase amount is ' + money(minimum), 'error');
+  if (maximum && inr > maximum) return toast('Maximum purchase amount is ' + money(maximum), 'error');
+  if (Math.abs(inr - paid) > 1) return toast('Paid amount must match order amount exactly', 'error');
+  if (!/^[A-Za-z0-9-]{6,40}$/.test(utr)) return toast('Enter a valid UTR / reference', 'error');
+  if (!app.proof) return toast('Upload payment proof', 'error');
+  const btn = document.querySelector('#buyArea .btn.primary.full');
+  btn?.classList.add('loading');
+  app.pendingOrderKey = app.pendingOrderKey || (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
+  try {
+    const d = await api('/orders', { method: 'POST', headers: { 'Idempotency-Key': app.pendingOrderKey }, body: JSON.stringify({ inr, paid, utr, proof: app.proof }) });
+    app.pendingOrderKey = '';
+    toast('Payment submitted. Order ' + d.order.id + ' is under review');
+    $('utr').value = '';
+    $('paidAmount').value = '';
+    $('proofInput').value = '';
+    $('proofLabel').textContent = 'Upload payment screenshot';
+    document.querySelector('.proof-preview')?.remove();
+    app.proof = null;
+    await refreshAccount();
+    showDashPage('orders');
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    btn?.classList.remove('loading');
+  }
+}
+
+function setOrderFilter(v, el) {
+  app.orderFilter = v;
+  document.querySelectorAll('.filter-chip').forEach(x => x.classList.toggle('active', x === el));
+  renderOrders();
+}
+
+function orderBadge(o) {
+  return o.status === 'USDT Sent' ? 'sent' : o.status === 'Payment Verified' ? 'verified' : o.status === 'Rejected' ? 'failed' : 'review';
+}
+
+function renderOrders() {
+  const filtered = app.orderFilter === 'all' ? app.orders : app.orders.filter(o => o.status === app.orderFilter);
+  $('ordersTable').innerHTML = filtered.map(o => `<tr><td><span class="order-id-link" onclick="openOrder('${o.id}')">${o.id}</span></td><td>${new Date(o.date).toLocaleDateString()}</td><td>${money(o.inr)}</td><td>${num(o.usdt)}</td><td>${escapeHtml(o.utr)}</td><td><span class="badge ${orderBadge(o)}">${o.status}</span></td></tr>`).join('') || '<tr><td colspan="6">No orders in this status.</td></tr>';
+}
+
+function openOrder(id) {
+  const o = app.orders.find(x => x.id === id);
+  if (!o) return;
+  const settlement = o.settlement?.txId ? `<div class="detail-box" style="grid-column:1/-1"><small>TRON TRANSACTION ID</small><b style="word-break:break-all">${escapeHtml(o.settlement.txId)}</b></div>` : '';
+  const rejection = o.rejection?.reason ? `<div class="detail-box" style="grid-column:1/-1"><small>REJECTION REASON</small><b>${escapeHtml(o.rejection.reason)}</b></div>` : '';
+  const body = $('orderDetailBody');
+  body.innerHTML = `<div class="detail-grid"><div class="detail-box"><small>ORDER ID</small><b>${o.id}</b></div><div class="detail-box"><small>STATUS</small><b>${o.status}</b></div><div class="detail-box"><small>INR PAID</small><b>${money(o.inr)}</b></div><div class="detail-box"><small>USDT ESTIMATE</small><b>${num(o.usdt)} USDT</b></div><div class="detail-box"><small>RATE</small><b>₹${Number(o.rate).toFixed(2)}</b></div><div class="detail-box"><small>UTR</small><b>${escapeHtml(o.utr)}</b></div><div class="detail-box"><small>PAYMENT MODE</small><b>${escapeHtml(o.configSnapshot?.paymentMode || app.config?.paymentMode || '—')}</b></div><div class="detail-box" style="grid-column:1/-1"><small>RECEIVING WALLET</small><b>${escapeHtml(o.wallet)}</b></div>${settlement}${rejection}</div>`;
+  showModal('orderDetailModal');
+}
+
+function escapeHtml(v = '') {
+  return String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
+}
+
+async function saveProfile() {
+  const payload = { name: $('profileName').value.trim(), mobile: $('profileMobile').value.trim(), currency: $('profileCurrency').value };
+  try {
+    await api('/profile', { method: 'PATCH', body: JSON.stringify(payload) });
+    toast('Profile updated');
+    await refreshAccount();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function submitSupport() {
+  const text = $('supportMessage').value.trim();
+  const type = $('supportType').value;
+  const orderId = $('supportOrder').value.trim();
+  if (text.length < 10) return toast('Please explain the issue in a little more detail', 'error');
+  try {
+    await api('/support', { method: 'POST', body: JSON.stringify({ type, text, orderId }) });
+    $('supportMessage').value = '';
+    $('supportOrder').value = '';
+    toast('Support ticket submitted');
+    await refreshAccount();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function renderWalletHistory(completed) {
+  const total = completed.reduce((s, o) => s + Number(o.usdt || 0), 0);
+  if ($('walletReceivedTotal')) $('walletReceivedTotal').textContent = num(total) + ' USDT';
+  if (!$('walletHistory')) return;
+  $('walletHistory').innerHTML = completed.map(o => `
+    <div class="ticket" style="margin-bottom:8px">
+      <div class="ticket-top"><h4>${num(o.usdt)} USDT received</h4><small>${new Date(o.settlement?.recordedAt || o.date).toLocaleDateString()}</small></div>
+      <p class="small">Order ${escapeHtml(o.id)} · ${money(o.inr)} · TX ${escapeHtml(o.settlement?.txId || 'Recorded by admin')}</p>
+    </div>`).join('') || '<div class="notice">No received USDT yet. Completed settlements will appear here.</div>';
+}
+
+function renderAll() {
+  const u = app.user || {};
+  const has = !!app.wallet;
+  $('walletEmpty')?.classList.toggle('hidden', has);
+  $('walletSaved')?.classList.toggle('hidden', !has);
+  if (has) $('walletText').textContent = app.wallet;
+  $('buyLock')?.classList.toggle('hidden', has);
+  $('buyArea')?.classList.toggle('hidden', !has);
+  if ($('buyWalletDisplay')) $('buyWalletDisplay').textContent = has ? app.wallet : 'No wallet saved.';
+  if ($('kpiWallet')) $('kpiWallet').textContent = has ? 'Saved' : 'Not saved';
+  if ($('kpiOrders')) $('kpiOrders').textContent = app.orders.length;
+  const completed = app.orders.filter(o => o.status === 'USDT Sent');
+  if ($('kpiUsdt')) $('kpiUsdt').textContent = num(completed.reduce((s, o) => s + Number(o.usdt), 0)) + ' USDT';
+  if ($('kpiInr')) $('kpiInr').textContent = money(app.orders.reduce((s, o) => s + Number(o.inr), 0));
+  if ($('orderCountMini')) $('orderCountMini').textContent = app.orders.length;
+  if ($('reviewCountMini')) $('reviewCountMini').textContent = app.orders.filter(o => ['Under Review', 'Payment Verified'].includes(o.status)).length;
+  if ($('completedCountMini')) $('completedCountMini').textContent = completed.length;

@@ -10,3 +10,6 @@ local.properties
 # Generated from source-parts by npm run prepare
 website/index.html
 android/app/src/main/assets/index.html
+
+# Rebuilt from committed WTRON parts by npm run prepare-assets
+android/app/src/main/assets/wtron.html

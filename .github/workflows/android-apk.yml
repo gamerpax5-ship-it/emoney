@@ -26,6 +26,10 @@ jobs:
           grep -q 'digiRupee' android/app/src/main/res/values/strings.xml
           grep -q 'digirupee_logo' android/app/src/main/AndroidManifest.xml
           grep -q 'WEB_APP_URL' android/app/build.gradle.kts
+          test -s android/app/src/main/assets/wtron-parts/part-000
+
+      - name: Prepare packaged WTRON app asset
+        run: npm run prepare-assets
 
       - name: Set up Java 17
         uses: actions/setup-java@v4

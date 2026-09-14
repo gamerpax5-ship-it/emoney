@@ -16,7 +16,7 @@
 <section class="dash-page active" id="overview">
 <div class="dash-welcome">
 <div class="dash-welcome-copy"><span>WELCOME BACK</span><h2>Buy digital assets with a clearer workflow.</h2><p>Manage your wallet, INR purchase orders and account activity from one workspace.</p></div>
-<div class="dash-welcome-meta"><div><small>INR RATE</small><b>₹112.40</b></div><div><small>SUPPORT</small><b>Online</b></div></div>
+<div class="dash-welcome-meta"><div><small>INR RATE</small><b id="overviewRate">Loading</b></div><div><small>SUPPORT</small><b id="overviewSupport">Online</b></div></div>
 </div><div class="system-strip"><span><i class="live-dot"></i> Platform operational</span><span id="apiStatus">Server connected</span><span id="lastSync">Synced just now</span></div>
 <div class="cards-4">
 <div class="kpi"><small>Total orders</small><b id="kpiOrders">0</b><div class="delta">All submitted orders</div></div>
@@ -28,8 +28,8 @@
 <div class="panel"><div class="panel-head"><h3>Recent orders</h3><span>Last 5</span></div><div id="recentOrders"></div></div>
 <div class="panel"><div class="panel-head"><h3>Quick actions</h3></div>
 <div style="display:grid;gap:8px"><button class="btn primary full" onclick="showDashPage('buy')">Create Buy order</button><button class="btn secondary full" onclick="showDashPage('wallet')">Manage USDT wallet</button><button class="btn secondary full" onclick="showDashPage('account')">Account &amp; support</button></div>
-<div class="notice" style="margin-top:12px">INR is currently live. USD, EUR and GBP are marked Coming Soon.</div>
-<div class="overview-tools"><div class="mini-tool"><span class="tool-icon">?</span><div><b>Support desk</b><small>Payment, wallet or UTR help</small></div><button onclick="showDashPage('account')">Open</button></div><div class="mini-tool"><span class="tool-icon">§</span><div><b>Policies</b><small>Privacy, terms and refunds</small></div><button onclick="showDashPage('account')">View</button></div></div></div>
+<div class="notice" id="currencyNotice" style="margin-top:12px">Loading currency availability.</div>
+<div class="overview-tools"><div class="mini-tool"><span class="tool-icon">?</span><div><b>Support desk</b><small id="overviewSupportText">Payment, wallet or UTR help</small></div><button onclick="showDashPage('account')">Open</button></div><div class="mini-tool"><span class="tool-icon">§</span><div><b>Policies</b><small>Privacy, terms and refunds</small></div><button onclick="showDashPage('account')">View</button></div></div></div>
 </div>
 </section>
 <section class="dash-page" id="buy">
@@ -38,10 +38,11 @@
 <div class="panel-head"><h3>Buy USDT</h3><span>INR LIVE</span></div>
 <div class="alert" id="buyLock">Save your USDT receiving address first from the Wallet page.</div>
 <div class="hidden" id="buyArea">
-<div class="form-grid"><div><span class="label">INR amount</span><input class="input" id="buyInr" oninput="calcBuy()" type="number" value="100000"/></div><div><span class="label">Current rate</span><input class="input" disabled="" id="rateDisplay" value="₹112.40 / USDT"/></div></div>
-<div style="margin-top:12px;padding:14px;border-radius:14px;background:#f5f7ff;border:1px solid #dfe5ff;display:flex;justify-content:space-between"><span><small class="small">Estimated receive</small><br/><b id="buyUsdt">889.68 USDT</b></span><span style="text-align:right"><small class="small">Network</small><br/><b>TRC20</b></span></div>
-<div class="bank-card" style="margin-top:12px"><span class="bank-badge">ADMIN BANK DETAILS</span><div class="line-row"><span>Bank</span><strong id="bankName">HDFC Bank</strong></div><div class="line-row"><span>Account name</span><strong id="bankAccountName">LOKTRON SERVICES</strong></div><div class="line-row"><span>Account number</span><strong id="bankAccountNumber">XXXX XXXX 4582</strong></div><div class="line-row"><span>IFSC</span><strong id="bankIfsc">HDFC0001234</strong></div><div class="line-row"><span>Transfer</span><strong id="bankTransferTypes">IMPS / NEFT / RTGS</strong></div></div>
-<div class="notice" style="margin-top:10px">Pay only to the bank details displayed on this order page. Confirm beneficiary details before transferring INR.</div>
+<div class="form-grid"><div><span class="label">INR amount</span><input class="input" id="buyInr" oninput="calcBuy(true)" type="number" value="100000"/></div><div><span class="label">Current rate</span><input class="input" disabled="" id="rateDisplay" value="Loading"/></div></div>
+<div style="margin-top:12px;padding:14px;border-radius:14px;background:#f5f7ff;border:1px solid #dfe5ff;display:flex;justify-content:space-between"><span><small class="small">Estimated receive</small><br/><b id="buyUsdt">0 USDT</b></span><span style="text-align:right"><small class="small">Network</small><br/><b id="networkDisplay">TRC20</b></span></div>
+<div class="notice" id="limitNotice" style="margin-top:10px">Loading order limits.</div>
+<div class="bank-card" style="margin-top:12px"><span class="bank-badge">ADMIN BANK DETAILS</span><div class="line-row"><span>Bank</span><strong id="bankName">HDFC Bank</strong></div><div class="line-row"><span>Account name</span><strong id="bankAccountName">LOKTRON SERVICES</strong></div><div class="line-row"><span>Account number</span><strong id="bankAccountNumber">XXXX XXXX 4582</strong></div><div class="line-row"><span>IFSC</span><strong id="bankIfsc">HDFC0001234</strong></div><div class="line-row"><span>Payment mode</span><strong id="paymentModeDisplay">IMPS / NEFT / RTGS</strong></div><div class="line-row"><span>Transfer</span><strong id="bankTransferTypes">IMPS / NEFT / RTGS</strong></div></div>
+<div class="notice" id="payInstruction" style="margin-top:10px">Pay only to the bank details displayed on this order page. Confirm beneficiary details before transferring INR.</div>
 <div style="margin-top:12px"><span class="label">Payment proof</span><div class="upload"><input accept="image/*" id="proofInput" onchange="proofChanged()" type="file"/><b id="proofLabel">Upload payment screenshot</b><span style="font-size:8px">PNG / JPG / screenshot</span></div></div>
 <div class="form-grid" style="margin-top:10px"><div><span class="label">Exact amount paid</span><input class="input" id="paidAmount" placeholder="100000" type="number"/></div><div><span class="label">UTR / Reference</span><input class="input" id="utr" placeholder="Enter UTR"/></div></div>
 <button class="btn primary full" onclick="submitOrder()" style="margin-top:12px">Submit payment for verification</button>

@@ -18,6 +18,7 @@ import android.webkit.WebViewClient;
 
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 1001;
+    private static final String LOCAL_APP_URL = "file:///android_asset/wtron.html";
     private WebView webView;
     private ValueCallback<Uri[]> fileCallback;
     private boolean showingOfflinePage = false;
@@ -42,7 +43,9 @@ public class MainActivity extends Activity {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
-        settings.setAllowFileAccess(false);
+        settings.setAllowFileAccess(true);
+        settings.setAllowFileAccessFromFileURLs(false);
+        settings.setAllowUniversalAccessFromFileURLs(false);
         settings.setAllowContentAccess(true);
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
@@ -104,7 +107,7 @@ public class MainActivity extends Activity {
 
     private void loadWebApp() {
         showingOfflinePage = false;
-        webView.loadUrl(BuildConfig.WEB_APP_URL);
+        webView.loadUrl(LOCAL_APP_URL);
     }
 
     private void showOfflinePage() {
@@ -114,9 +117,9 @@ public class MainActivity extends Activity {
                 + "<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#070512;color:#fff;font-family:Arial,sans-serif}"
                 + ".box{max-width:360px;padding:24px;text-align:center}h1{font-size:22px}p{color:#c9c4df;line-height:1.5}"
                 + "button{border:0;border-radius:8px;padding:13px 18px;background:#7c4dff;color:#fff;font-weight:700}</style></head>"
-                + "<body><div class=\"box\"><h1>digiRupee is offline</h1><p>Please check your internet connection and retry.</p>"
-                + "<button onclick=\"location.href='" + BuildConfig.WEB_APP_URL + "'\">Retry</button></div></body></html>";
-        webView.loadDataWithBaseURL(BuildConfig.WEB_APP_URL, html, "text/html", "UTF-8", null);
+                + "<body><div class=\"box\"><h1>digiRupee could not open</h1><p>Please restart the app and try again.</p>"
+                + "<button onclick=\"location.href='" + LOCAL_APP_URL + "'\">Retry</button></div></body></html>";
+        webView.loadDataWithBaseURL(LOCAL_APP_URL, html, "text/html", "UTF-8", null);
     }
 
     @Override

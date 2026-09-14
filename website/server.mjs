@@ -73,6 +73,21 @@ const defaultData = {
     rate: 112.40,
     network: 'TRC20',
     minInr: 1000,
+    maxInr: 1000000,
+    paymentMode: 'IMPS / NEFT / RTGS',
+    support: {
+      label: 'Online',
+      telegram: '',
+      note: 'Payment, wallet and UTR support is available from the dashboard.'
+    },
+    currencies: [
+      { code: 'INR', name: 'Indian Rupee', symbol: '₹', status: 'live', note: 'Bank transfer, IMPS, NEFT and RTGS purchase orders enabled.' },
+      { code: 'USD', name: 'US Dollar', symbol: '$', status: 'coming-soon', note: 'Additional purchase rails will appear when activated.' },
+      { code: 'EUR', name: 'Euro', symbol: '€', status: 'coming-soon', note: 'European payment options are planned for future rollout.' },
+      { code: 'GBP', name: 'British Pound', symbol: '£', status: 'coming-soon', note: 'UK banking and pricing will appear when available.' },
+      { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', status: 'coming-soon', note: 'Gulf payment rails are prepared for future rollout.' },
+      { code: 'USDT', name: 'Tether USD', symbol: '₮', status: 'coming-soon', note: 'Crypto-side purchase and settlement options will appear when activated.' }
+    ],
     bank: {
       bank: 'HDFC Bank',
       accountName: 'LOKTRON SERVICES',
@@ -118,7 +133,15 @@ async function loadDb() {
     return {
       ...structuredClone(defaultData),
       ...parsed,
-      config: { ...structuredClone(defaultData.config), ...(parsed.config || {}) },
+      config: {
+        ...structuredClone(defaultData.config),
+        ...(parsed.config || {}),
+        bank: { ...structuredClone(defaultData.config.bank), ...((parsed.config || {}).bank || {}) },
+        support: { ...structuredClone(defaultData.config.support), ...((parsed.config || {}).support || {}) },
+        currencies: Array.isArray((parsed.config || {}).currencies) && (parsed.config || {}).currencies.length
+          ? (parsed.config || {}).currencies
+          : structuredClone(defaultData.config.currencies)
+      },
       users: Array.isArray(parsed.users) ? parsed.users : [],
       orders: Array.isArray(parsed.orders) ? parsed.orders : [],
       bankLedger: Array.isArray(parsed.bankLedger) ? parsed.bankLedger : [],
@@ -714,15 +737,36 @@ async function api(req, res, path) {
     const b = await body(req);
     const rate = Number(b.rate);
     if (!Number.isFinite(rate) || rate <= 0) return send(res, 400, { error: 'Invalid rate' });
+    const minInr = Math.max(1, Number(b.minInr || db.config.minInr));
+    const maxInr = Math.max(minInr, Number(b.maxInr || db.config.maxInr || minInr));
     db.config.rate = rate;
-    db.config.minInr = Math.max(1, Number(b.minInr || db.config.minInr));
+    db.config.minInr = minInr;
+    db.config.maxInr = maxInr;
+    db.config.paymentMode = String(b.paymentMode || db.config.paymentMode || '').trim().slice(0, 120) || defaultData.config.paymentMode;
+    const support = b.support || {};
+    db.config.support = {
+      ...db.config.support,
+      label: String(support.label || db.config.support?.label || 'Online').trim().slice(0, 40) || 'Online',
+      telegram: String(support.telegram || '').trim().replace(/^https?:\/\/t\.me\//i, '@').slice(0, 80),
+      note: String(support.note || db.config.support?.note || '').trim().slice(0, 180)
+    };
     const bank = b.bank || {};
     for (const key of ['bank', 'accountName', 'accountNumber', 'ifsc', 'transferTypes']) {
       if (String(bank[key] || '').trim()) db.config.bank[key] = String(bank[key]).trim().slice(0, 120);
     }
+    if (Array.isArray(b.currencies) && b.currencies.length) {
+      db.config.currencies = b.currencies.slice(0, 12).map(item => ({
+        code: String(item.code || '').trim().toUpperCase().slice(0, 8),
+        name: String(item.name || '').trim().slice(0, 40),
+        symbol: String(item.symbol || '').trim().slice(0, 6),
+        status: String(item.status || '').toLowerCase() === 'live' ? 'live' : 'coming-soon',
+        note: String(item.note || '').trim().slice(0, 140)
+      })).filter(item => item.code && item.name);
+      if (!db.config.currencies.some(item => item.code === 'INR')) db.config.currencies.unshift(structuredClone(defaultData.config.currencies[0]));
+    }
     appendAudit({
       actorType: 'admin', actorId: admin.email, action: 'config.updated', entityType: 'config', entityId: 'purchase',
-      details: { rate: db.config.rate, minInr: db.config.minInr, bank: db.config.bank.bank, accountNumber: db.config.bank.accountNumber }
+      details: { rate: db.config.rate, minInr: db.config.minInr, maxInr: db.config.maxInr, bank: db.config.bank.bank, accountNumber: db.config.bank.accountNumber, support: db.config.support.telegram }
     });
     await persist();
     return send(res, 200, { config: db.config });
@@ -913,8 +957,7 @@ async function api(req, res, path) {
     });
     appendAudit({ actorType: 'user', actorId: user.id, action: 'user.registered', entityType: 'user', entityId: user.id, details: { email: user.email } });
     await persist();
-    const token = makeSession(user.id);
-    return send(res, 201, { user: publicUser(user) }, { 'Set-Cookie': sessionCookie(req, token) });
+    return send(res, 201, { user: publicUser(user), loginRequired: true });
   }
 
   if (req.method === 'POST' && path === '/auth/logout') {
@@ -979,6 +1022,7 @@ async function api(req, res, path) {
     if (existing) return send(res, 200, { order: publicOrder(existing), replayed: true });
 
     if (!Number.isFinite(inr) || inr < db.config.minInr) return send(res, 400, { error: `Minimum order is ₹${db.config.minInr}` });
+    if (Number.isFinite(Number(db.config.maxInr)) && inr > Number(db.config.maxInr)) return send(res, 400, { error: `Maximum order is ₹${db.config.maxInr}` });
     if (Math.abs(inr - paid) > 1) return send(res, 400, { error: 'Paid amount must match order amount' });
     if (!/^[A-Za-z0-9-]{6,40}$/.test(utr)) return send(res, 400, { error: 'Invalid UTR / reference' });
     if (db.orders.some(o => String(o.utr).toLowerCase() === utr.toLowerCase())) return send(res, 409, { error: 'This UTR has already been submitted' });
@@ -1006,6 +1050,13 @@ async function api(req, res, path) {
       status: 'Under Review',
       proofFile: file,
       bankSnapshot: structuredClone(db.config.bank),
+      configSnapshot: {
+        rate: db.config.rate,
+        network: db.config.network,
+        minInr: db.config.minInr,
+        maxInr: db.config.maxInr,
+        paymentMode: db.config.paymentMode
+      },
       idempotencyKey,
       updatedAt: Date.now()
     };

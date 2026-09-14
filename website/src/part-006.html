@@ -23,6 +23,19 @@
 
 #buyArea [style*="background:#f5f7ff"],#walletSaved [style*="background:#f3f7fb"]{background:linear-gradient(145deg,#171526,#10101a)!important;border-color:#343049!important;color:#fff!important}
 
+/* final readability guard for dark dashboard surfaces */
+#dashboard .panel,#dashboard .kpi,#dashboard .ticket,#dashboard .legal-card{background:linear-gradient(155deg,#12111d,#0d0c16)!important;border-color:#302a48!important;color:#f7f4ff!important}
+#dashboard .panel h3,#dashboard .ticket h4,#dashboard .legal-card h3,#dashboard .kpi b{color:#fff!important}
+#dashboard .small,#dashboard .label,#dashboard .panel-head span,#dashboard .ticket small,#dashboard .legal-card p{color:#bcb4d0!important}
+#dashboard .notice{background:#121a2a!important;border-color:#30405f!important;color:#d7e2f5!important}
+#dashboard .alert{background:#2b210d!important;border-color:#6c5521!important;color:#ffe3a0!important}
+#dashboard .input,#dashboard .select,#dashboard .textarea{background:#10131f!important;border-color:#343851!important;color:#fff!important}
+#dashboard .input::placeholder,#dashboard .textarea::placeholder{color:#817b94!important}
+#dashboard .order-table th{color:#b7b2c9!important;border-bottom-color:#302a48!important}
+#dashboard .order-table td{color:#f2efff!important;border-bottom-color:#252039!important}
+#dashboard .bank-card{background:linear-gradient(145deg,#071a28,#102f45)!important;border:1px solid #254966!important}
+#dashboard .bank-card strong{color:#fff!important}
+
 /* ===== Production website interaction polish ===== */
 .auth-divider{display:flex;align-items:center;gap:12px;margin:14px 0;color:#9da4bb;font-size:11px}.auth-divider:before,.auth-divider:after{content:"";height:1px;background:rgba(255,255,255,.12);flex:1}.auth-security{font-size:10px!important;text-align:center!important;color:#969db5!important;margin-bottom:0!important}
 .system-strip{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin:12px 0 18px;padding:10px 14px;border:1px solid rgba(139,112,255,.2);border-radius:12px;background:rgba(18,13,39,.7);font-size:11px;color:#d9d9e9}.live-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#28d996;margin-right:6px;box-shadow:0 0 12px rgba(40,217,150,.8)}
