@@ -167,7 +167,23 @@
 
   function scheduleRefresh() { clearTimeout(state.refreshTimer); if (state.user && !document.hidden) state.refreshTimer = setTimeout(refreshAll, 12000); }
   function stopRefresh() { clearTimeout(state.refreshTimer); state.refreshTimer = null; }
-  function renderAll() { applyPreferences(); renderStats(); renderHome(); renderSell(); renderOrders(); renderMethods(); renderTasks(); renderWheel(); renderNotifications(); renderReferral(); renderSecurityState(); renderActiveOrder(); }
+  function uiStateSnapshot() {
+    return {
+      user: state.user,
+      profile: state.profile,
+      rates: state.rates,
+      methods: state.methods,
+      orders: state.orders,
+      rewards: state.rewards,
+      campaigns: state.campaigns,
+      wheel: state.wheel
+    };
+  }
+  function publishUiState() {
+    window.dispatchEvent(new CustomEvent('digirupee:state', { detail: uiStateSnapshot() }));
+  }
+  function renderAll() { applyPreferences(); renderStats(); renderHome(); renderSell(); renderOrders(); renderMethods(); renderTasks(); renderWheel(); renderNotifications(); renderReferral(); renderSecurityState(); renderActiveOrder(); publishUiState(); }
+  window.__digiStateSnapshot = uiStateSnapshot;
 
   function applyPreferences() {
     document.body.classList.toggle('pure', prefs.theme === 'pure');

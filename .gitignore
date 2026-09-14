@@ -18,3 +18,6 @@ website/digirupee-app.js
 website/digirupee-qr.js
 
 .digirupee-2fa-key.txt
+website/digirupee-rewards.js
+website/digirupee-rewards-assets.js
+website/digirupee-layout-v3.js

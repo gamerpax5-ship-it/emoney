@@ -2,20 +2,17 @@
   'use strict';
 
   const assets = window.__DIGIRUPEE_REWARD_ASSETS || {};
-  if (!assets.content || !assets.nav || !assets.wheel) return;
+  if (!assets.content || !assets.wheel) return;
 
   const SOURCE_W = 941;
   const SOURCE_H = 1510;
-  const FULL_H = 1672;
-  const CROP_TOP = 42;
+  const CROP_TOP = 145;
   const FRAME_END = 1235;
   const FRAME_H = FRAME_END - CROP_TOP;
-  const NAV_SOURCE_H = 162;
-  const model = { rewards: null, wheel: null, campaigns: [] };
+  const model = { rewards:null, wheel:null, campaigns:[] };
 
   let spinning = false;
   let rotation = 0;
-  let refreshTimer = null;
   let showAllTasks = false;
 
   const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({
@@ -49,402 +46,181 @@
 
   function toast(message) {
     if (typeof window.toastMsg === 'function') return window.toastMsg(message);
-    let node = document.getElementById('rewardV26Toast');
-    if (!node) {
-      node = document.createElement('div');
-      node.id = 'rewardV26Toast';
-      node.className = 'reward-v26-toast';
-      document.querySelector('.app')?.appendChild(node);
-    }
-    node.textContent = message;
-    node.classList.add('show');
-    clearTimeout(node._timer);
-    node._timer = setTimeout(() => node.classList.remove('show'), 1900);
   }
 
   function injectStyles() {
-    if (document.getElementById('digi-approved-reward-v26-css')) return;
-
+    if (document.getElementById('digi-rewards-v3-css')) return;
     const cropShift = ((CROP_TOP / FRAME_H) * 100).toFixed(4);
-    const rotorSourceTop = SOURCE_H * 0.4105956;
     const style = document.createElement('style');
-    style.id = 'digi-approved-reward-v26-css';
+    style.id = 'digi-rewards-v3-css';
     style.textContent = `
-      body.reward-v22-mode{
-        overflow:hidden!important;
-        background:#000!important;
-        padding:0!important;
+      #rewards.reward-v3-ready{padding-bottom:18px!important;background:#050607!important}
+      #rewards.reward-v3-ready>*:not(.reward-v3-root){display:none!important}
+      .reward-v3-root{
+        width:calc(100% + 30px);
+        margin:0 -15px;
+        background:#050607;
+        color:#f7f3ec;
       }
-      body.reward-v22-mode .app{
-        width:min(430px,100vw)!important;
-        max-width:430px!important;
-        height:100dvh!important;
-        min-height:0!important;
-        margin:0 auto!important;
-        position:relative!important;
-        display:block!important;
-        overflow:hidden!important;
-        background:#000!important;
-        border:0!important;
-        border-radius:0!important;
+      .reward-v3-visual{
+        position:relative;
+        width:calc(100% + 12px);
+        margin-left:-6px;
+        aspect-ratio:${SOURCE_W}/${FRAME_H};
+        overflow:hidden;
+        line-height:0;
+        background:#000;
+        user-select:none;
+        -webkit-user-select:none;
+        touch-action:pan-y;
       }
-      body.reward-v22-mode .statusbar,
-      body.reward-v22-mode .header,
-      body.reward-v22-mode .app>.nav{
-        display:none!important;
-      }
-      body.reward-v22-mode #rewards{
-        display:block!important;
-        position:absolute!important;
-        inset:0!important;
-        width:100%!important;
-        height:100%!important;
-        max-height:100%!important;
-        margin:0!important;
-        padding:0 0 min(17.22vw,74px)!important;
-        box-sizing:border-box!important;
-        overflow-y:auto!important;
-        overflow-x:hidden!important;
-        -webkit-overflow-scrolling:touch!important;
-        overscroll-behavior-y:contain!important;
-        touch-action:pan-y!important;
-        scrollbar-width:none!important;
-        background:#000!important;
-        animation:none!important;
-      }
-      body.reward-v22-mode #rewards::-webkit-scrollbar{display:none!important}
-      body.reward-v22-mode #rewards>*:not(.reward-v24-root){display:none!important}
-
-      body.reward-v22-mode .reward-v24-root{
-        position:relative!important;
-        display:flex!important;
-        flex-direction:column!important;
-        width:100%!important;
-        min-height:calc(100dvh - min(17.22vw,74px))!important;
-        height:auto!important;
-        margin:0!important;
-        padding:24px 0 0!important;
-        box-sizing:border-box!important;
-        overflow:visible!important;
-        background:#000!important;
-        color:#f7f3ec!important;
-        line-height:1.35!important;
-        touch-action:pan-y!important;
-      }
-      .reward-v24-visual{
-        position:relative!important;
-        flex:0 0 auto!important;
-        width:100%!important;
-        aspect-ratio:${SOURCE_W}/${FRAME_H}!important;
-        height:auto!important;
-        overflow:hidden!important;
-        line-height:0!important;
-        touch-action:pan-y!important;
-        user-select:none!important;
-        -webkit-user-select:none!important;
-        background:#000!important;
-      }
-      .reward-v24-art{
-        position:absolute!important;
-        z-index:1!important;
-        left:0!important;
-        top:-${cropShift}%!important;
-        display:block!important;
-        width:100%!important;
-        height:auto!important;
-        max-width:none!important;
-        pointer-events:none!important;
-        user-select:none!important;
-        -webkit-user-drag:none!important;
-      }
-      .reward-v24-rotor{
-        position:absolute!important;
-        z-index:8!important;
-        left:17.0032%!important;
-        top:${frameY(rotorSourceTop)}!important;
-        width:30.2869%!important;
-        height:auto!important;
-        opacity:0!important;
-        pointer-events:none!important;
-        transform-origin:50% 50%!important;
-        backface-visibility:hidden!important;
-        will-change:transform!important;
-      }
-      .reward-v24-rotor.spinning{opacity:1!important}
-
-      .digi-reward-live{
+      .reward-v3-art{
         position:absolute;
-        z-index:28;
-        box-sizing:border-box;
-        color:#fff;
-        font-family:Inter,system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
-        line-height:1.18;
+        z-index:1;
+        left:0;
+        top:-${cropShift}%;
+        width:100%;
+        height:auto;
+        max-width:none;
+        pointer-events:none;
+        -webkit-user-drag:none;
       }
-
-      .digi-reward-wallet{
-        left:70.7%;
-        top:${frameY(354)};
-        width:18.0%;
-        height:${frameH(101)};
-        padding:7px 6px 5px;
+      .reward-v3-rotor{
+        position:absolute;
+        z-index:8;
+        left:17.0%;
+        top:${frameY(620)};
+        width:30.3%;
+        height:auto;
+        opacity:0;
+        pointer-events:none;
+        transform-origin:50% 50%;
+        backface-visibility:hidden;
+        will-change:transform;
+      }
+      .reward-v3-rotor.spinning{opacity:1}
+      .reward-v3-live{
+        position:absolute;
+        z-index:24;
+        box-sizing:border-box;
+        font-family:Inter,system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
+        line-height:1.25;
+      }
+      .reward-v3-wallet{
+        left:64.4%;
+        top:${frameY(343)};
+        width:29.1%;
+        height:${frameH(120)};
+        padding:10px 12px;
         display:flex;
         flex-direction:column;
         justify-content:center;
-        overflow:hidden;
-        pointer-events:none;
-        background:linear-gradient(90deg,rgba(52,32,18,.99),rgba(38,24,16,.99));
+        border:1px solid rgba(241,195,78,.58);
+        border-radius:18px;
+        background:linear-gradient(135deg,rgba(67,39,19,.995),rgba(33,22,17,.995));
+        box-shadow:0 9px 24px rgba(0,0,0,.28),inset 0 1px rgba(255,255,255,.05);
+        color:#fff;
+        cursor:pointer;
       }
-      .digi-reward-wallet small{display:block;color:#c8c3bc;font-size:8.5px;white-space:nowrap}
-      .digi-reward-wallet b{display:block;margin-top:4px;color:#ffd75d;font-size:14px;white-space:nowrap}
-      .digi-reward-wallet span{display:block;margin-top:4px;color:#b1aaa2;font-size:7.5px;white-space:nowrap}
-
-      .digi-reward-news{
-        left:34.1%;
-        top:${frameY(500)};
-        width:57.8%;
-        height:${frameH(44)};
-        padding:0 8px 0 10px;
+      .reward-v3-wallet small{color:#d2cbc0;font-size:9px;white-space:nowrap}
+      .reward-v3-wallet b{margin-top:4px;color:#ffd65b;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .reward-v3-wallet span{margin-top:5px;color:#9f9990;font-size:8px;white-space:nowrap}
+      .reward-v3-news{
+        left:33.0%;
+        top:${frameY(497)};
+        width:60.5%;
+        height:${frameH(57)};
+        padding:0 10px;
         display:flex;
         align-items:center;
-        gap:8px;
-        overflow:hidden;
-        pointer-events:none;
-        background:linear-gradient(90deg,rgba(20,17,18,.99),rgba(17,18,21,.99));
+        gap:9px;
+        background:linear-gradient(90deg,rgba(20,21,24,.998),rgba(16,17,20,.998));
+        color:#fff;
+        cursor:pointer;
       }
-      .digi-reward-news span{
-        min-width:0;
-        flex:1;
-        color:#f0eeea;
-        font-size:8.8px;
-        white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
-      }
-      .digi-reward-news em{
-        color:#9f9a94;
-        font-size:7.7px;
-        font-style:normal;
-        white-space:nowrap;
-      }
-
-      .digi-reward-spin-status{
-        left:64.8%;
-        top:${frameY(785)};
-        width:24.8%;
-        height:${frameH(63)};
-        padding:3px 2px 2px;
+      .reward-v3-news span{min-width:0;flex:1;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#f0eeea}
+      .reward-v3-news em{font-size:8px;font-style:normal;color:#96928d;white-space:nowrap}
+      .reward-v3-spin-card{
+        left:55.5%;
+        top:${frameY(772)};
+        width:36.3%;
+        height:${frameH(160)};
+        padding:12px 12px 10px;
         display:flex;
         flex-direction:column;
         justify-content:center;
-        pointer-events:none;
-        overflow:hidden;
-        background:linear-gradient(90deg,rgba(19,20,23,.99),rgba(16,17,20,.99));
+        border:1px solid #36393e;
+        border-radius:18px;
+        background:linear-gradient(145deg,rgba(19,21,24,.998),rgba(12,13,15,.998));
+        color:#fff;
+        box-shadow:0 8px 22px rgba(0,0,0,.25);
       }
-      .digi-reward-spin-status b{display:block;color:#fff;font-size:11px;white-space:nowrap}
-      .digi-reward-spin-status small{display:block;margin-top:5px;color:#c5c1ba;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .digi-reward-spin-button{
-        left:57.6%;
-        top:${frameY(855)};
-        width:32.0%;
-        height:${frameH(55)};
-        padding:0;
-        pointer-events:auto;
-      }
-      .digi-reward-spin-button button{
+      .reward-v3-spin-copy b{display:block;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .reward-v3-spin-copy small{display:block;margin-top:4px;color:#b7b2aa;font-size:8px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .reward-v3-spin-card button{
         width:100%;
-        height:100%;
-        min-height:0;
-        margin:0;
+        min-height:38px;
+        margin-top:10px;
         border:0;
         border-radius:999px;
-        background:linear-gradient(180deg,#ffdf68,#e9ad31);
+        background:linear-gradient(180deg,#ffe071,#e7ab2d);
         color:#161006;
-        font-size:11px;
+        font-size:10px;
         font-weight:900;
-        box-shadow:inset 0 1px 0 rgba(255,255,255,.55);
+        box-shadow:inset 0 1px rgba(255,255,255,.55);
       }
-      .digi-reward-spin-button button:disabled{
-        background:linear-gradient(180deg,#8f7936,#79662d);
-        color:#17140c;
-        opacity:.96;
+      .reward-v3-spin-card button:disabled{background:linear-gradient(180deg,#8f7936,#79662d);opacity:.96;color:#15130c}
+      .reward-v3-task-section{
+        padding:15px 20px 18px;
+        background:#050607;
       }
-
-      .reward-v26-task-section{
-        flex:1 0 190px;
-        min-height:190px;
-        padding:11px 22px 18px;
-        display:flex;
-        flex-direction:column;
-        box-sizing:border-box;
-        background:#000;
-      }
-      .reward-v26-task-head{
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:12px;
-        margin:0 2px 9px;
-      }
-      .reward-v26-task-head h3{
-        margin:0;
-        color:#f1c84e;
-        font-size:15px;
-        line-height:1.2;
-        letter-spacing:-.2px;
-      }
-      .reward-v26-task-head button{
-        border:0;
-        background:none;
-        color:#aaa6a0;
-        font-size:9px;
-        padding:6px 0;
-      }
-      .reward-v26-task-list{
-        flex:1;
-        display:flex;
-        flex-direction:column;
-        gap:8px;
-        min-height:0;
-      }
-      .reward-v26-task-card{
-        flex:1 1 auto;
-        min-height:112px;
+      .reward-v3-task-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+      .reward-v3-task-head h3{margin:0;color:#f1ca58;font-size:16px;letter-spacing:-.2px}
+      .reward-v3-task-head button{border:0;background:none;color:#9da1a8;font-size:9.5px;padding:5px 0}
+      .reward-v3-task-list{display:flex;flex-direction:column;gap:8px}
+      .reward-v3-task-card{
         display:grid;
-        grid-template-columns:44px minmax(0,1fr) auto;
-        grid-template-rows:auto auto;
+        grid-template-columns:42px minmax(0,1fr) auto;
         gap:8px 10px;
         align-items:center;
-        padding:13px 14px;
-        border:1px solid #292c32;
-        border-radius:17px;
-        background:linear-gradient(145deg,#121418,#0a0b0d);
-        box-sizing:border-box;
+        padding:12px;
+        border:1px solid #292d35;
+        border-radius:14px;
+        background:#0d0f12;
       }
-      .reward-v26-task-icon{
-        grid-row:1/3;
-        width:44px;
-        height:44px;
-        border-radius:12px;
-        display:grid;
-        place-items:center;
-        background:#171a1f;
-        border:1px solid #333740;
-        color:#f0ca56;
-        font-size:19px;
-        font-weight:900;
+      .reward-v3-task-icon{
+        grid-row:1/4;
+        width:42px;height:42px;border-radius:11px;
+        display:grid;place-items:center;
+        background:#171a1f;border:1px solid #333740;color:#efc95f;font-size:18px;font-weight:900;
       }
-      .reward-v26-task-copy{min-width:0}
-      .reward-v26-task-copy b{display:block;color:#fff;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .reward-v26-task-copy small{display:block;margin-top:4px;color:#a8a39c;font-size:8.5px;line-height:1.35}
-      .reward-v26-task-reward{align-self:start;color:#ffd75d;font-size:9px;font-weight:900;white-space:nowrap}
-      .reward-v26-progress{
-        grid-column:2/4;
-        height:6px;
-        border-radius:999px;
-        background:#272a30;
-        overflow:hidden;
-      }
-      .reward-v26-progress i{
-        display:block;
-        height:100%;
-        border-radius:inherit;
-        background:linear-gradient(90deg,#bd7b08,#ffd85b);
-      }
-      .reward-v26-task-action{
-        grid-column:2/4;
-        min-height:34px;
-        border:1px solid #66521b;
-        border-radius:10px;
-        background:#19160d;
-        color:#e9ca62;
-        font-size:9px;
-        font-weight:850;
-      }
-      .reward-v26-task-action:disabled{
-        border-color:#30333a;
-        background:#121418;
-        color:#7f8389;
-      }
-      .reward-v26-empty{
-        flex:1;
-        min-height:125px;
+      .reward-v3-task-copy{min-width:0}
+      .reward-v3-task-copy b{display:block;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .reward-v3-task-copy small{display:block;margin-top:3px;color:#989da5;font-size:8.7px;line-height:1.35}
+      .reward-v3-task-reward{align-self:start;color:#ffd75d;font-size:9px;font-weight:900;white-space:nowrap}
+      .reward-v3-progress{grid-column:2/4;height:5px;border-radius:999px;background:#272a30;overflow:hidden}
+      .reward-v3-progress i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#bd7b08,#ffd85b)}
+      .reward-v3-task-action{grid-column:2/4;min-height:34px;border:1px solid #66521b;border-radius:10px;background:#19160d;color:#e9ca62;font-size:9px;font-weight:850}
+      .reward-v3-task-action:disabled{border-color:#30333a;background:#121418;color:#7f8389}
+      .reward-v3-empty{
+        min-height:126px;
         display:grid;
         place-items:center;
         padding:20px;
-        border:1px solid #292c32;
-        border-radius:17px;
-        background:linear-gradient(145deg,#101216,#090a0c);
-        color:#aaa6a0;
+        border:1px solid #292d35;
+        border-radius:14px;
+        background:#0d0f12;
+        color:#969ba3;
         text-align:center;
         font-size:10px;
-        box-sizing:border-box;
+        line-height:1.5;
       }
-
-      .reward-v24-nav{
-        position:absolute!important;
-        z-index:70!important;
-        left:0!important;
-        right:0!important;
-        bottom:0!important;
-        width:100%!important;
-        height:auto!important;
-        overflow:hidden!important;
-        background:#050506!important;
-        box-shadow:0 -10px 28px rgba(0,0,0,.28)!important;
-        touch-action:manipulation!important;
-      }
-      .reward-v24-nav img{
-        display:block!important;
-        width:100%!important;
-        height:auto!important;
-        pointer-events:none!important;
-        user-select:none!important;
-      }
-      .reward-v26-toast{
-        position:absolute;
-        z-index:140;
-        left:50%;
-        bottom:calc(min(17.22vw,74px) + 14px);
-        transform:translateX(-50%) translateY(8px);
-        max-width:82%;
-        padding:10px 14px;
-        border-radius:999px;
-        background:rgba(15,16,19,.97);
-        border:1px solid rgba(255,215,93,.28);
-        color:#ffe17a;
-        font:800 11px/1.25 Inter,system-ui,sans-serif;
-        text-align:center;
-        box-shadow:0 12px 28px rgba(0,0,0,.38);
-        opacity:0;
-        pointer-events:none;
-        transition:.18s ease;
-      }
-      .reward-v26-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-
       @media(max-width:370px){
-        body.reward-v22-mode .reward-v24-root{padding-top:22px!important}
-        .reward-v26-task-section{padding-left:16px;padding-right:16px}
-        .digi-reward-wallet b{font-size:12px}
-        .digi-reward-wallet small{font-size:7.5px}
-        .digi-reward-wallet span{font-size:6.8px}
-        .digi-reward-news span{font-size:8px}
-        .digi-reward-news em{font-size:7px}
-        .digi-reward-spin-status b{font-size:10px}
-        .digi-reward-spin-status small{font-size:7px}
-      }
-      @media(min-width:431px){
-        body.reward-v22-mode{
-          display:flex!important;
-          align-items:center!important;
-          justify-content:center!important;
-          min-height:100vh!important;
-        }
-        body.reward-v22-mode .app{
-          height:min(900px,100dvh)!important;
-          border-radius:24px!important;
-          border:1px solid #25262a!important;
-          box-shadow:0 20px 70px rgba(0,0,0,.62)!important;
-        }
+        .reward-v3-root{width:calc(100% + 26px);margin-left:-13px;margin-right:-13px}
+        .reward-v3-task-section{padding-left:16px;padding-right:16px}
+        .reward-v3-wallet{padding:8px 9px}.reward-v3-wallet b{font-size:13px}.reward-v3-wallet small{font-size:8px}.reward-v3-wallet span{font-size:7px}
+        .reward-v3-news span{font-size:8px}.reward-v3-news em{font-size:7px}
+        .reward-v3-spin-copy b{font-size:10px}.reward-v3-spin-copy small{font-size:7px}.reward-v3-spin-card button{min-height:34px;font-size:9px;margin-top:7px}
       }
     `;
     document.head.appendChild(style);
@@ -454,72 +230,56 @@
     return (model.campaigns || [])
       .flatMap(campaign => (campaign.tasks || []).map(task => ({
         ...task,
-        campaignId: campaign.id,
-        campaignTitle: campaign.title
+        campaignId:campaign.id,
+        campaignTitle:campaign.title
       })))
       .filter(task => task.enabled !== false);
   }
 
   function buildDynamicLayers(visual) {
     const wallet = document.createElement('div');
-    wallet.id = 'digiRewardWallet';
-    wallet.className = 'digi-reward-live digi-reward-wallet';
+    wallet.id = 'rewardV3Wallet';
+    wallet.className = 'reward-v3-live reward-v3-wallet';
+    wallet.addEventListener('click', () => window.openRewardHistory?.());
     visual.appendChild(wallet);
 
     const news = document.createElement('div');
-    news.id = 'digiRewardNews';
-    news.className = 'digi-reward-live digi-reward-news';
+    news.id = 'rewardV3News';
+    news.className = 'reward-v3-live reward-v3-news';
+    news.addEventListener('click', () => {
+      const campaign = model.campaigns?.[0];
+      toast(campaign?.title || 'No active bonus campaign');
+    });
     visual.appendChild(news);
 
-    const spinStatus = document.createElement('div');
-    spinStatus.id = 'digiRewardSpinStatus';
-    spinStatus.className = 'digi-reward-live digi-reward-spin-status';
-    visual.appendChild(spinStatus);
-
-    const spinButton = document.createElement('div');
-    spinButton.id = 'digiRewardSpinButton';
-    spinButton.className = 'digi-reward-live digi-reward-spin-button';
-    visual.appendChild(spinButton);
+    const spin = document.createElement('div');
+    spin.id = 'rewardV3SpinCard';
+    spin.className = 'reward-v3-live reward-v3-spin-card';
+    visual.appendChild(spin);
   }
 
-  function originalYPercent(framePercent) {
-    const sourceY = CROP_TOP + (Number(framePercent) / 100) * FRAME_H;
-    return (sourceY / FULL_H) * 100;
+  function sourceYFromFramePercent(framePercent) {
+    return CROP_TOP + (Number(framePercent) / 100) * FRAME_H;
   }
 
   function hitAction(nx, ny) {
-    const sourceYPercent = originalYPercent(ny);
+    const sy = sourceYFromFramePercent(ny);
     const rects = [
-      ['notify',84.5,3.6,10,5],
-      ['explore',7,24,26,4.2],
-      ['wallet',64.3,21.2,28.3,7.4],
-      ['news',4.2,29.5,91.5,3.2],
-      ['spin',58.2,50,32.4,5.4],
-      ['more',77.8,58,16,3],
-      ['new',5,61.3,18.7,12.7],
-      ['invite',25.8,61.3,18.7,12.7],
-      ['tasks',46.8,61.3,18.7,12.7],
-      ['events',68.1,61.3,18.7,12.7]
+      ['explore',9,407,25,48],
+      ['more',77,970,17,40],
+      ['new',7,1010,20.5,216],
+      ['invite',29,1010,20.5,216],
+      ['tasks',51,1010,20.5,216],
+      ['events',73,1010,20.5,216]
     ];
-    for (const rect of rects) {
-      if (
-        nx >= rect[1] &&
-        nx <= rect[1] + rect[3] &&
-        sourceYPercent >= rect[2] &&
-        sourceYPercent <= rect[2] + rect[4]
-      ) return rect[0];
+    for (const [action,x,y,w,h] of rects) {
+      if (nx >= x && nx <= x + w && sy >= y && sy <= y + h) return action;
     }
     return '';
   }
 
   function act(action) {
-    if (action === 'notify') return window.openNotifications?.();
-    if (action === 'explore' || action === 'wallet' || action === 'more') return window.openRewardHistory?.();
-    if (action === 'news') {
-      const campaign = (model.campaigns || []).find(item => item.active !== false);
-      return toast(campaign?.title || 'No active bonus campaign');
-    }
-    if (action === 'spin') return spinApproved();
+    if (action === 'explore' || action === 'more') return window.openRewardHistory?.();
     if (action === 'new') return window.openEvent?.('newuser');
     if (action === 'invite') return window.openReferral?.();
     if (action === 'tasks') return scrollToTasks();
@@ -529,26 +289,25 @@
   function build() {
     const page = document.getElementById('rewards');
     if (!page) return;
-
     injectStyles();
-    document.querySelector('.reward-v24-nav')?.remove();
-    page.querySelectorAll('.reward-v22-shell,.reward-v22-bottom,.reward-v24-root').forEach(node => node.remove());
+    page.classList.add('reward-v3-ready');
+    page.querySelector('.reward-v3-root')?.remove();
 
     const root = document.createElement('div');
-    root.className = 'reward-v24-root';
+    root.className = 'reward-v3-root';
 
     const visual = document.createElement('div');
-    visual.className = 'reward-v24-visual';
+    visual.className = 'reward-v3-visual';
 
     const art = document.createElement('img');
-    art.className = 'reward-v24-art';
+    art.className = 'reward-v3-art';
     art.src = assets.content;
     art.alt = 'digiRupee Rewards';
     visual.appendChild(art);
 
     const rotor = document.createElement('img');
-    rotor.className = 'reward-v24-rotor';
-    rotor.id = 'rewardV24Rotor';
+    rotor.className = 'reward-v3-rotor';
+    rotor.id = 'rewardV3Rotor';
     rotor.src = assets.wheel;
     rotor.alt = '';
     visual.appendChild(rotor);
@@ -567,7 +326,7 @@
       if (Math.abs(event.clientX - startX) > 8 || Math.abs(event.clientY - startY) > 8) moved = true;
     }, { passive:true });
     visual.addEventListener('click', event => {
-      if (moved || event.target.closest('.digi-reward-spin-button')) return;
+      if (moved || event.target.closest('.reward-v3-live')) return;
       const box = visual.getBoundingClientRect();
       const nx = (event.clientX - box.left) / box.width * 100;
       const ny = (event.clientY - box.top) / box.height * 100;
@@ -577,148 +336,102 @@
 
     root.appendChild(visual);
 
-    const taskSection = document.createElement('section');
-    taskSection.className = 'reward-v26-task-section';
-    taskSection.id = 'rewardV26TaskSection';
-    taskSection.innerHTML = '<div class="reward-v26-task-head"><h3>Task Center</h3><button type="button" id="rewardV26TaskToggle">View All ›</button></div><div class="reward-v26-task-list" id="rewardV26TaskList"></div>';
-    root.appendChild(taskSection);
-
+    const tasks = document.createElement('section');
+    tasks.className = 'reward-v3-task-section';
+    tasks.id = 'rewardV3TaskSection';
+    tasks.innerHTML = `<div class="reward-v3-task-head"><h3>Task Center</h3><button type="button" id="rewardV3TaskToggle">View All ›</button></div><div class="reward-v3-task-list" id="rewardV3TaskList"></div>`;
+    root.appendChild(tasks);
     page.appendChild(root);
 
-    const nav = document.createElement('div');
-    nav.className = 'reward-v24-nav';
-    nav.id = 'rewardV24Nav';
-    const navImage = document.createElement('img');
-    navImage.src = assets.nav;
-    navImage.alt = 'digiRupee navigation';
-    nav.appendChild(navImage);
-    nav.addEventListener('click', event => {
-      const box = nav.getBoundingClientRect();
-      const x = (event.clientX - box.left) / box.width * 100;
-      if (x < 20) return window.go?.('home');
-      if (x < 40) return window.go?.('sell');
-      if (x < 60) return window.go?.('orders');
-      if (x < 80) return;
-      return window.go?.('profile');
-    });
-    document.querySelector('.app')?.appendChild(nav);
-
-    document.getElementById('rewardV26TaskToggle')?.addEventListener('click', event => {
-      event.stopPropagation();
-      const tasks = activeTasks();
-      if (tasks.length <= 1) return scrollToTasks();
+    document.getElementById('rewardV3TaskToggle')?.addEventListener('click', () => {
+      const list = activeTasks();
+      if (list.length <= 1) return scrollToTasks();
       showAllTasks = !showAllTasks;
       renderTaskSection();
       requestAnimationFrame(scrollToTasks);
     });
 
-    page.scrollTop = 0;
     renderDynamic();
   }
 
   function renderDynamic() {
-    const wallet = document.getElementById('digiRewardWallet');
-    if (wallet) {
-      wallet.innerHTML = `<small>My Rewards</small><b>${num(model.rewards?.balance || 0)} USDT</b><span>Server-managed</span>`;
-    }
+    const wallet = document.getElementById('rewardV3Wallet');
+    if (wallet) wallet.innerHTML = `<small>My Rewards</small><b>${num(model.rewards?.balance || 0)} USDT</b><span>Available reward balance ›</span>`;
 
-    const campaign = (model.campaigns || []).find(item => item.active !== false);
-    const news = document.getElementById('digiRewardNews');
-    if (news) {
-      news.innerHTML = `<span>${esc(campaign ? campaign.title : 'No active bonus campaign')}</span><em>${campaign ? 'Admin campaign' : 'Waiting'}</em>`;
-    }
+    const campaign = model.campaigns?.[0];
+    const news = document.getElementById('rewardV3News');
+    if (news) news.innerHTML = `<span>${esc(campaign?.title || 'No active bonus campaign')}</span><em>${campaign ? 'Active' : 'Waiting'}</em>`;
 
     const wheel = model.wheel;
-    const spinStatus = document.getElementById('digiRewardSpinStatus');
-    const spinButton = document.getElementById('digiRewardSpinButton');
-    if (spinStatus) {
+    const spinCard = document.getElementById('rewardV3SpinCard');
+    if (spinCard) {
       const canSpin = !!wheel?.canSpin;
       const previous = wheel?.previousResult?.rewardAmount;
       const detail = canSpin
         ? '1 spin available today'
         : wheel?.nextEligibleAt
-          ? `Next: ${new Date(wheel.nextEligibleAt).toLocaleString('en-IN', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}`
+          ? `Next ${new Date(wheel.nextEligibleAt).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}`
           : 'Come back tomorrow';
-      spinStatus.innerHTML = `<b>${canSpin ? 'Ready to Spin' : previous ? `Today: ${num(previous)} USDT` : 'Used Today'}</b><small>${esc(detail)}</small>`;
-    }
-    if (spinButton) {
-      const canSpin = !!wheel?.canSpin;
-      spinButton.innerHTML = `<button id="rewardApprovedSpin" ${canSpin && !spinning ? '' : 'disabled'}>${spinning ? 'Spinning…' : canSpin ? 'Spin Now →' : 'Used Today'}</button>`;
-      document.getElementById('rewardApprovedSpin')?.addEventListener('click', event => {
-        event.stopPropagation();
-        spinApproved();
-      });
+      spinCard.innerHTML = `<div class="reward-v3-spin-copy"><b>${canSpin ? 'Ready to Spin' : previous ? `Today: ${num(previous)} USDT` : 'Used Today'}</b><small>${esc(detail)}</small></div><button type="button" id="rewardV3SpinButton" ${canSpin && !spinning ? '' : 'disabled'}>${spinning ? 'Spinning…' : canSpin ? 'Spin Now →' : 'Used Today'}</button>`;
+      document.getElementById('rewardV3SpinButton')?.addEventListener('click', spinApproved);
     }
 
     renderTaskSection();
   }
 
   function taskCard(task) {
-    const progress = Number(task.eligibility?.progress || 0);
-    const target = Math.max(1, Number(task.eligibility?.target || 1));
+    const rawProgress = Number(task.eligibility?.progress || 0);
+    const rawTarget = Number(task.eligibility?.target || 1);
+    const progress = Number.isFinite(rawProgress) ? rawProgress : 0;
+    const target = Number.isFinite(rawTarget) && rawTarget > 0 ? rawTarget : 1;
     const percent = Math.max(0, Math.min(100, progress / target * 100));
     const eligible = !!task.eligibility?.eligible && !task.claim;
     const claimed = !!task.claim;
-    const actionText = claimed
-      ? esc(task.claim.status || 'Claimed')
-      : eligible
-        ? 'Claim Now'
-        : 'In Progress';
-    const icon = String(task.claimType || '').toLowerCase().includes('ref') ? 'R' : '✓';
-
-    return `<article class="reward-v26-task-card">
-      <div class="reward-v26-task-icon">${icon}</div>
-      <div class="reward-v26-task-copy">
-        <b>${esc(task.title || 'Reward task')}</b>
-        <small>${esc(task.description || task.campaignTitle || 'Complete this task to earn rewards.')}</small>
-      </div>
-      <div class="reward-v26-task-reward">${num(task.rewardAmount || 0)} USDT</div>
-      <div class="reward-v26-progress"><i style="width:${percent}%"></i></div>
-      <button class="reward-v26-task-action" data-task-id="${esc(task.id)}" data-campaign-id="${esc(task.campaignId)}" ${eligible ? '' : 'disabled'}>${actionText}</button>
+    const actionText = claimed ? esc(task.claim.status || 'Claimed') : eligible ? 'Claim Now' : 'In Progress';
+    return `<article class="reward-v3-task-card">
+      <div class="reward-v3-task-icon">✓</div>
+      <div class="reward-v3-task-copy"><b>${esc(task.title || 'Reward task')}</b><small>${esc(task.description || task.campaignTitle || 'Complete this task to earn rewards.')}</small></div>
+      <div class="reward-v3-task-reward">${num(task.rewardAmount || 0)} USDT</div>
+      <div class="reward-v3-progress"><i style="width:${percent}%"></i></div>
+      <button class="reward-v3-task-action" type="button" data-task-id="${esc(task.id)}" data-campaign-id="${esc(task.campaignId)}" ${eligible ? '' : 'disabled'}>${actionText}</button>
     </article>`;
   }
 
   function renderTaskSection() {
-    const list = document.getElementById('rewardV26TaskList');
-    const toggle = document.getElementById('rewardV26TaskToggle');
+    const list = document.getElementById('rewardV3TaskList');
+    const toggle = document.getElementById('rewardV3TaskToggle');
     if (!list) return;
-
     const tasks = activeTasks();
     if (toggle) {
       toggle.textContent = tasks.length > 1 ? (showAllTasks ? 'Collapse ↑' : 'View All ›') : 'View All ›';
       toggle.disabled = tasks.length === 0;
     }
-
     if (!tasks.length) {
-      list.innerHTML = '<div class="reward-v26-empty">No active reward tasks right now.<br>New admin campaigns will appear here.</div>';
+      list.innerHTML = '<div class="reward-v3-empty">No active reward tasks right now.<br>New admin campaigns will appear here.</div>';
       return;
     }
-
     const visible = showAllTasks ? tasks : [tasks.find(task => !task.claim) || tasks[0]];
     list.innerHTML = visible.map(taskCard).join('');
-    list.querySelectorAll('.reward-v26-task-action:not(:disabled)').forEach(button => {
-      button.addEventListener('click', async event => {
-        event.stopPropagation();
+    list.querySelectorAll('.reward-v3-task-action:not(:disabled)').forEach(button => {
+      button.addEventListener('click', async () => {
         button.disabled = true;
         try {
           if (typeof window.claimTask !== 'function') throw new Error('Task claim is unavailable');
           await window.claimTask(button.dataset.taskId, button.dataset.campaignId);
-          setTimeout(refreshState, 700);
         } catch (error) {
           toast(error.message || 'Could not claim task');
-          setTimeout(refreshState, 500);
         }
       });
     });
   }
 
-  async function refreshState() {
+  function scrollToTasks() {
+    document.getElementById('rewardV3TaskSection')?.scrollIntoView({ behavior:'smooth', block:'start' });
+  }
+
+  async function refreshRewardState() {
     try {
-      const [rewards, wheel, campaigns] = await Promise.all([
-        api('/rewards'),
-        api('/wheel'),
-        api('/campaigns')
-      ]);
+      const [rewards, wheel, campaigns] = await Promise.all([api('/rewards'), api('/wheel'), api('/campaigns')]);
       model.rewards = rewards;
       model.wheel = wheel;
       model.campaigns = campaigns.campaigns || [];
@@ -728,52 +441,33 @@
     }
   }
 
-  function scrollToTasks() {
-    const page = document.getElementById('rewards');
-    const section = document.getElementById('rewardV26TaskSection');
-    if (!page || !section) return;
-    page.scrollTo({
-      top: Math.max(0, section.offsetTop - 8),
-      behavior:'smooth'
-    });
-  }
-
   async function spinApproved() {
     if (spinning) return;
     if (!model.wheel?.canSpin) return toast('Today’s spin is already used');
-
     spinning = true;
     renderDynamic();
-
     try {
       const result = await api('/wheel/spin', {
         method:'POST',
         headers:{ 'Idempotency-Key':idempotencyKey() }
       });
-
       const segments = model.wheel?.segments || [];
-      let index = segments.findIndex(segment =>
-        String(segment.label ?? '') === String(result.result?.label ?? '')
-      );
-      if (index < 0) {
-        index = segments.findIndex(segment =>
-          Number(segment.rewardAmount) === Number(result.result?.rewardAmount)
-        );
-      }
+      let index = segments.findIndex(segment => String(segment.id || '') === String(result.result?.segmentId || ''));
+      if (index < 0) index = segments.findIndex(segment => String(segment.label || '') === String(result.result?.label || ''));
+      if (index < 0) index = segments.findIndex(segment => Number(segment.rewardAmount) === Number(result.result?.rewardAmount));
       if (index < 0) index = 0;
 
-      const rotor = document.getElementById('rewardV24Rotor');
+      const rotor = document.getElementById('rewardV3Rotor');
       if (!rotor) throw new Error('Reward wheel is unavailable');
-
+      const slice = 360 / Math.max(1, segments.length || 8);
       const current = ((rotation % 360) + 360) % 360;
-      const target = ((360 - index * (360 / Math.max(1, segments.length || 8))) % 360 + 360) % 360;
+      const target = ((360 - index * slice) % 360 + 360) % 360;
       const delta = (target - current + 360) % 360;
       rotation += 360 * 7 + delta;
 
       rotor.style.transition = 'none';
       rotor.style.transform = `rotate(${current}deg)`;
       rotor.classList.add('spinning');
-
       requestAnimationFrame(() => requestAnimationFrame(() => {
         rotor.style.transition = 'transform 4.6s cubic-bezier(.12,.96,.16,1)';
         rotor.style.transform = `rotate(${rotation}deg)`;
@@ -783,33 +477,30 @@
       rotor.classList.remove('spinning');
       rotor.style.transition = 'none';
       rotor.style.transform = 'rotate(0deg)';
-
       toast(`You won ${num(result.result?.rewardAmount || 0)} USDT`);
-      await refreshState();
+      await refreshRewardState();
     } catch (error) {
-      toast(error.message);
+      toast(error.message || 'Could not spin the wheel');
     } finally {
       spinning = false;
       renderDynamic();
     }
   }
 
-  function enter() {
-    document.body.classList.add('reward-v22-mode');
-    build();
-    refreshState();
-    clearInterval(refreshTimer);
-    refreshTimer = setInterval(() => {
-      if (!document.hidden && document.body.classList.contains('reward-v22-mode')) refreshState();
-    }, 12000);
+  function consumeState(detail) {
+    if (!detail) return;
+    if (detail.rewards) model.rewards = detail.rewards;
+    if (detail.wheel) model.wheel = detail.wheel;
+    if (Array.isArray(detail.campaigns)) model.campaigns = detail.campaigns;
+    if (document.getElementById('rewards')?.classList.contains('active')) {
+      if (!document.querySelector('.reward-v3-root')) build();
+      else renderDynamic();
+    }
   }
 
-  function leave() {
-    document.body.classList.remove('reward-v22-mode');
-    document.querySelector('.reward-v24-nav')?.remove();
-    clearInterval(refreshTimer);
-    refreshTimer = null;
-    showAllTasks = false;
+  function enter() {
+    build();
+    if (!model.rewards || !model.wheel) refreshRewardState();
   }
 
   const previousGo = window.go;
@@ -817,24 +508,18 @@
     window.go = function(page) {
       previousGo(page);
       if (page === 'rewards') requestAnimationFrame(enter);
-      else leave();
     };
   }
 
+  if (typeof window.__digiStateSnapshot === 'function') consumeState(window.__digiStateSnapshot());
+  window.addEventListener('digirupee:state', event => consumeState(event.detail || {}));
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && document.body.classList.contains('reward-v22-mode')) {
-      if (!document.querySelector('.reward-v24-root')) build();
-      refreshState();
+    if (!document.hidden && document.getElementById('rewards')?.classList.contains('active')) {
+      if (!document.querySelector('.reward-v3-root')) build();
+      renderDynamic();
     }
   });
 
-  window.addEventListener('resize', () => {
-    if (document.body.classList.contains('reward-v22-mode') && !document.querySelector('.reward-v24-root')) build();
-  }, { passive:true });
-
-  if (document.getElementById('rewards')?.classList.contains('active')) {
-    requestAnimationFrame(enter);
-  }
-
-  window.__rewardV26 = { build, refreshState, scrollToTasks, spin:spinApproved };
+  if (document.getElementById('rewards')?.classList.contains('active')) requestAnimationFrame(enter);
+  window.__rewardV3 = { build, refresh:refreshRewardState, spin:spinApproved, scrollToTasks };
 })();
