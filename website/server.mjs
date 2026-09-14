@@ -136,6 +136,10 @@ const defaultData = {
       updatedAt: Date.now()
     },
     users: [],
+    payoutMethods: [],
+    quotes: [],
+    orders: [],
+    tronAddresses: [],
     auditLog: [],
     sessions: []
   }
@@ -190,6 +194,10 @@ async function loadDb() {
           }
         },
         users: Array.isArray((parsed.digirupee || {}).users) ? (parsed.digirupee || {}).users : [],
+        payoutMethods: Array.isArray((parsed.digirupee || {}).payoutMethods) ? (parsed.digirupee || {}).payoutMethods : [],
+        quotes: Array.isArray((parsed.digirupee || {}).quotes) ? (parsed.digirupee || {}).quotes : [],
+        orders: Array.isArray((parsed.digirupee || {}).orders) ? (parsed.digirupee || {}).orders : [],
+        tronAddresses: Array.isArray((parsed.digirupee || {}).tronAddresses) ? (parsed.digirupee || {}).tronAddresses : [],
         auditLog: Array.isArray((parsed.digirupee || {}).auditLog) ? (parsed.digirupee || {}).auditLog : [],
         sessions: Array.isArray((parsed.digirupee || {}).sessions) ? (parsed.digirupee || {}).sessions : []
       }
@@ -437,6 +445,379 @@ function publicDigiConfig() {
     channels: { upi: !!config.channels.upi, bank: !!config.channels.bank },
     updatedAt: config.updatedAt
   };
+}
+
+const digiFinalStatuses = new Set(['Completed', 'Expired', 'Failed', 'Rejected']);
+const digiActiveStatuses = new Set(['Awaiting Deposit', 'Detected', 'Confirming', 'USDT Confirmed', 'INR Processing', 'Late Review']);
+const digiAddressCooldownMs = 5 * 60 * 1000;
+
+function digiOrderIsActive(order) {
+  return digiActiveStatuses.has(String(order?.status || '')) && !digiFinalStatuses.has(String(order?.status || ''));
+}
+
+function parseInrPaise(value) {
+  const raw = String(value ?? '').trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(raw)) return null;
+  const [whole, fraction = ''] = raw.split('.');
+  const paise = Number(whole) * 100 + Number((fraction + '00').slice(0, 2));
+  return Number.isSafeInteger(paise) ? paise : null;
+}
+
+function formatInrPaise(paise) {
+  return Number((Number(paise) / 100).toFixed(2));
+}
+
+function parseUsdtMicros(value) {
+  const raw = String(value ?? '').trim();
+  if (!/^\d+(?:\.\d{1,6})?$/.test(raw)) return null;
+  const [whole, fraction = ''] = raw.split('.');
+  const micros = Number(whole) * 1_000_000 + Number((fraction + '000000').slice(0, 6));
+  return Number.isSafeInteger(micros) ? micros : null;
+}
+
+function formatUsdtMicros(micros) {
+  return Number((Number(micros) / 1_000_000).toFixed(6));
+}
+
+function rateToPaise(rate) {
+  const paise = parseInrPaise(rate);
+  return paise && paise > 0 ? paise : null;
+}
+
+function indiaDayKey(timestamp = Date.now()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(new Date(timestamp));
+  const values = Object.fromEntries(parts.filter(item => item.type !== 'literal').map(item => [item.type, item.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function maskDigiValue(value, keepStart = 2, keepEnd = 2) {
+  const text = String(value || '');
+  if (text.length <= keepStart + keepEnd) return '*'.repeat(text.length);
+  return `${text.slice(0, keepStart)}${'*'.repeat(Math.max(2, text.length - keepStart - keepEnd))}${text.slice(-keepEnd)}`;
+}
+
+function payoutMethodUsesActiveOrder(methodId) {
+  return db.digirupee.orders.some(order => digiOrderIsActive(order) && (
+    order.payoutMethodId === methodId || order.allocations?.some(item => item.payoutMethodId === methodId)
+  ));
+}
+
+function dailyMethodUsagePaise(methodId, timestamp = Date.now()) {
+  const today = indiaDayKey(timestamp);
+  return db.digirupee.orders.reduce((total, order) => {
+    if (indiaDayKey(order.createdAt) !== today || digiFinalStatuses.has(order.status)) return total;
+    if (order.payoutMethodId === methodId) return total + Number(order.inrPaise || 0);
+    return total + (order.allocations || [])
+      .filter(item => item.payoutMethodId === methodId)
+      .reduce((sum, item) => sum + Number(item.inrPaise || 0), 0);
+  }, 0);
+}
+
+function payoutMethodRemainingPaise(method, timestamp = Date.now()) {
+  const dailyLimit = parseInrPaise(method.dailyLimitInr) || 0;
+  return Math.max(0, dailyLimit - dailyMethodUsagePaise(method.id, timestamp));
+}
+
+function buildPayoutMethod(raw, existing = null) {
+  const merged = { ...(existing || {}), ...(raw || {}) };
+  const type = String(merged.type || '').trim().toUpperCase();
+  if (!['UPI', 'BANK'].includes(type)) return { error: 'Payout method type must be UPI or BANK' };
+  const label = String(merged.label || '').trim();
+  const holderName = String(merged.holderName || '').trim();
+  const mobile = normalizeDigiMobile(merged.mobile);
+  if (label.length < 1 || label.length > 40) return { error: 'Label must be 1 to 40 characters' };
+  if (holderName.length < 2 || holderName.length > 100) return { error: 'Enter a valid holder name' };
+  if (!mobile) return { error: 'Enter a valid mobile number' };
+
+  const minInr = parseInrPaise(merged.minInr);
+  const maxInr = parseInrPaise(merged.maxInr);
+  const dailyLimitInr = parseInrPaise(merged.dailyLimitInr);
+  if (!minInr || !maxInr || !dailyLimitInr || minInr <= 0 || maxInr < minInr || dailyLimitInr < maxInr) {
+    return { error: 'Limits must be positive, max must be at least min, and daily limit must cover max' };
+  }
+
+  const method = {
+    id: existing?.id || 'dpm_' + randomUUID().replace(/-/g, '').slice(0, 12),
+    userId: existing?.userId || '',
+    type,
+    label,
+    minInr: formatInrPaise(minInr),
+    maxInr: formatInrPaise(maxInr),
+    dailyLimitInr: formatInrPaise(dailyLimitInr),
+    enabled: merged.enabled === undefined ? true : merged.enabled === true,
+    createdAt: existing?.createdAt || Date.now(),
+    updatedAt: Date.now()
+  };
+  if (type === 'UPI') {
+    const upiId = String(merged.upiId || '').trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9._-]{1,255}@[a-z0-9][a-z0-9.-]{1,63}$/i.test(upiId)) return { error: 'Enter a valid UPI ID' };
+    method.upiId = upiId;
+    method.holderName = holderName;
+    method.mobile = mobile;
+  } else {
+    const accountNumber = String(merged.accountNumber || '').replace(/[\s-]/g, '');
+    const ifsc = String(merged.ifsc || '').trim().toUpperCase();
+    const bankName = String(merged.bankName || '').trim();
+    if (!/^\d{6,24}$/.test(accountNumber)) return { error: 'Enter a valid bank account number' };
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) return { error: 'Enter a valid IFSC code' };
+    if (bankName.length < 2 || bankName.length > 100) return { error: 'Enter a valid bank name' };
+    method.bankName = bankName;
+    method.accountNumber = accountNumber;
+    method.ifsc = ifsc;
+    method.holderName = holderName;
+    method.mobile = mobile;
+  }
+  return { method };
+}
+
+function publicDigiPayoutMethod(method) {
+  return { ...method };
+}
+
+function decodeBase58(value) {
+  const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  let number = 0n;
+  for (const character of String(value || '')) {
+    const index = alphabet.indexOf(character);
+    if (index < 0) return null;
+    number = number * 58n + BigInt(index);
+  }
+  const bytes = [];
+  while (number > 0n) {
+    bytes.unshift(Number(number & 255n));
+    number >>= 8n;
+  }
+  for (const character of String(value || '')) {
+    if (character !== '1') break;
+    bytes.unshift(0);
+  }
+  return Buffer.from(bytes);
+}
+
+function isValidTronAddress(value) {
+  const address = String(value || '').trim();
+  if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(address)) return false;
+  const decoded = decodeBase58(address);
+  if (!decoded || decoded.length !== 25 || decoded[0] !== 0x41) return false;
+  const payload = decoded.subarray(0, 21);
+  const checksum = decoded.subarray(21);
+  const expected = createHash('sha256').update(createHash('sha256').update(payload).digest()).digest().subarray(0, 4);
+  return safeEqualText(checksum.toString('hex'), expected.toString('hex'));
+}
+
+function publicDigiAddress(address) {
+  return { ...address };
+}
+
+function releaseDigiAddress(order, timestamp = Date.now()) {
+  const address = db.digirupee.tronAddresses.find(item => item.id === order.depositAddressId);
+  if (!address || address.reservedOrderId !== order.id) return false;
+  address.reservedOrderId = null;
+  address.reservedUntil = timestamp + digiAddressCooldownMs;
+  address.updatedAt = timestamp;
+  return true;
+}
+
+function expireDigiOrders(timestamp = Date.now()) {
+  let changed = false;
+  for (const quote of db.digirupee.quotes) {
+    if (quote.status === 'issued' && Number(quote.expiresAt) <= timestamp) {
+      quote.status = 'expired';
+      changed = true;
+    }
+  }
+  for (const order of db.digirupee.orders) {
+    if (digiFinalStatuses.has(order.status)) {
+      if (releaseDigiAddress(order, timestamp)) changed = true;
+      continue;
+    }
+    if (order.status !== 'Awaiting Deposit' || Number(order.quoteExpiresAt) > timestamp) continue;
+    order.status = 'Expired';
+    order.updatedAt = timestamp;
+    order.timeline = Array.isArray(order.timeline) ? order.timeline : [];
+    order.timeline.push({ status: 'Expired', at: timestamp });
+    releaseDigiAddress(order, timestamp);
+    changed = true;
+  }
+  return changed;
+}
+
+function activeDigiOrderForUser(userId) {
+  return db.digirupee.orders
+    .filter(order => order.userId === userId && digiOrderIsActive(order))
+    .sort((a, b) => Number(b.createdAt) - Number(a.createdAt))[0] || null;
+}
+
+function findOwnedPayoutMethod(userId, id) {
+  return db.digirupee.payoutMethods.find(method => method.id === id && method.userId === userId) || null;
+}
+
+function methodSummary(method) {
+  if (!method) return null;
+  return method.type === 'UPI'
+    ? { id: method.id, type: method.type, label: method.label, upiId: method.upiId }
+    : { id: method.id, type: method.type, label: method.label, bankName: method.bankName, accountNumber: maskDigiValue(method.accountNumber, 2, 4), ifsc: method.ifsc };
+}
+
+function allocationResponse(allocation) {
+  return { payoutMethodId: allocation.payoutMethodId, inrAmount: formatInrPaise(allocation.inrPaise) };
+}
+
+function publicDigiOrder(order, { admin = false } = {}) {
+  const result = {
+    id: order.id,
+    ...(admin ? { userId: order.userId } : {}),
+    quoteId: order.quoteId,
+    payoutType: order.payoutType,
+    payoutMethodId: order.payoutMethodId || null,
+    allocations: (order.allocations || []).map(allocationResponse),
+    usdtAmount: formatUsdtMicros(order.usdtMicros),
+    lockedRate: formatInrPaise(order.lockedRatePaise),
+    inrAmount: formatInrPaise(order.inrPaise),
+    depositAddressId: order.depositAddressId,
+    depositAddress: order.depositAddress,
+    status: order.status,
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt,
+    quoteExpiresAt: order.quoteExpiresAt,
+    timeline: Array.isArray(order.timeline) ? order.timeline : [],
+    txId: null,
+    confirmations: 0,
+    payout: null,
+    review: null,
+    payoutMethods: ((order.payoutMethodIds || []).map(id => db.digirupee.payoutMethods.find(method => method.id === id)).filter(Boolean).length
+      ? (order.payoutMethodIds || []).map(id => db.digirupee.payoutMethods.find(method => method.id === id)).filter(Boolean)
+      : (order.payoutMethodSnapshots || [])).map(method => methodSummary(method))
+  };
+  if (admin) {
+    result.payoutMethods = (order.payoutMethodIds || []).map(id => db.digirupee.payoutMethods.find(method => method.id === id)).filter(Boolean).map(method => ({ ...method }));
+    result.user = publicDigiUser(db.digirupee.users.find(user => user.id === order.userId) || { id: order.userId, profile: {}, email: '', mobile: '', createdAt: null, status: 'unknown' });
+  }
+  return result;
+}
+
+function publicDigiQuote(quote) {
+  return {
+    quoteId: quote.id,
+    payoutType: quote.payoutType,
+    usdtAmount: formatUsdtMicros(quote.usdtMicros),
+    rate: formatInrPaise(quote.ratePaise),
+    inrAmount: formatInrPaise(quote.inrPaise),
+    expiresAt: quote.expiresAt,
+    quoteValiditySeconds: Math.max(0, Math.ceil((quote.expiresAt - quote.createdAt) / 1000)),
+    payoutSummary: quote.payoutSummary,
+    allocations: (quote.allocations || []).map(allocationResponse)
+  };
+}
+
+function normalizeDigiAllocations(raw) {
+  if (!Array.isArray(raw) || !raw.length) return null;
+  const seen = new Set();
+  const allocations = [];
+  for (const item of raw) {
+    const payoutMethodId = String(item?.payoutMethodId || '').trim();
+    const inrPaise = Number.isSafeInteger(Number(item?.inrPaise)) ? Number(item.inrPaise) : parseInrPaise(item?.inrAmount ?? item?.amount);
+    if (!payoutMethodId || !inrPaise || seen.has(payoutMethodId)) return null;
+    seen.add(payoutMethodId);
+    allocations.push({ payoutMethodId, inrPaise });
+  }
+  return allocations;
+}
+
+function autoAllocateDigiBank(userId, totalPaise, candidateIds = []) {
+  const requested = new Set(candidateIds.map(item => String(item).trim()).filter(Boolean));
+  const methods = db.digirupee.payoutMethods
+    .filter(method => method.userId === userId && method.type === 'BANK' && method.enabled && (!requested.size || requested.has(method.id)))
+    .map(method => ({ method, maxAvailable: Math.min(parseInrPaise(method.maxInr) || 0, payoutMethodRemainingPaise(method)) }))
+    .filter(item => item.maxAvailable >= (parseInrPaise(item.method.minInr) || Number.MAX_SAFE_INTEGER));
+  if (!methods.length) return null;
+
+  const single = methods
+    .filter(item => totalPaise >= (parseInrPaise(item.method.minInr) || 0) && totalPaise <= item.maxAvailable)
+    .sort((a, b) => a.maxAvailable - b.maxAvailable)[0];
+  if (single) return [{ payoutMethodId: single.method.id, inrPaise: totalPaise }];
+
+  const minimumTotal = methods.reduce((sum, item) => sum + (parseInrPaise(item.method.minInr) || 0), 0);
+  const capacityTotal = methods.reduce((sum, item) => sum + item.maxAvailable, 0);
+  if (totalPaise < minimumTotal || totalPaise > capacityTotal) return null;
+
+  const allocations = methods.map(item => ({
+    payoutMethodId: item.method.id,
+    inrPaise: parseInrPaise(item.method.minInr) || 0,
+    maxAvailable: item.maxAvailable
+  }));
+  let remaining = totalPaise - minimumTotal;
+  for (const allocation of allocations) {
+    const extra = Math.min(remaining, allocation.maxAvailable - allocation.inrPaise);
+    allocation.inrPaise += extra;
+    remaining -= extra;
+  }
+  return remaining === 0 ? allocations.map(({ payoutMethodId, inrPaise }) => ({ payoutMethodId, inrPaise })) : null;
+}
+
+function validateDigiPayoutSelection({ userId, payoutType, totalPaise, payoutMethodId, allocations, candidateIds = [], autoSplit = true }) {
+  const normalizedType = String(payoutType || '').trim().toUpperCase();
+  if (!['UPI', 'BANK'].includes(normalizedType)) return { error: 'Payout type must be UPI or BANK' };
+
+  if (normalizedType === 'UPI') {
+    const method = findOwnedPayoutMethod(userId, String(payoutMethodId || '').trim());
+    if (!method || method.type !== 'UPI') return { error: 'Select your own UPI payout method' };
+    if (!method.enabled) return { error: 'Selected UPI method is disabled' };
+    const min = parseInrPaise(method.minInr) || 0;
+    const max = parseInrPaise(method.maxInr) || 0;
+    if (totalPaise < min || totalPaise > max) return { error: 'Order INR amount is outside the UPI method limits' };
+    if (totalPaise > payoutMethodRemainingPaise(method)) return { error: 'UPI daily payout capacity is unavailable' };
+    return {
+      payoutType: normalizedType,
+      payoutMethodId: method.id,
+      payoutMethodIds: [method.id],
+      allocations: [],
+      payoutSummary: { method: methodSummary(method), inrAmount: formatInrPaise(totalPaise) }
+    };
+  }
+
+  let normalizedAllocations = normalizeDigiAllocations(allocations);
+  if (!normalizedAllocations && autoSplit) normalizedAllocations = autoAllocateDigiBank(userId, totalPaise, candidateIds);
+  if (!normalizedAllocations) return { error: 'Provide a valid bank allocation or no valid automatic split is available' };
+  if (normalizedAllocations.reduce((sum, item) => sum + item.inrPaise, 0) !== totalPaise) return { error: 'Bank allocation total must equal the server-computed INR amount' };
+
+  const methods = [];
+  const methodIds = [];
+  for (const allocation of normalizedAllocations) {
+    const method = findOwnedPayoutMethod(userId, allocation.payoutMethodId);
+    if (!method || method.type !== 'BANK') return { error: 'Every allocation must use your own bank account' };
+    if (!method.enabled) return { error: 'Every allocated bank account must be enabled' };
+    const min = parseInrPaise(method.minInr) || 0;
+    const max = parseInrPaise(method.maxInr) || 0;
+    if (allocation.inrPaise < min || allocation.inrPaise > max) return { error: `Allocation for ${method.label} is outside its limits` };
+    if (allocation.inrPaise > payoutMethodRemainingPaise(method)) return { error: `Daily capacity for ${method.label} is unavailable` };
+    methods.push(method);
+    methodIds.push(method.id);
+  }
+  return {
+    payoutType: normalizedType,
+    payoutMethodId: null,
+    payoutMethodIds: methodIds,
+    allocations: normalizedAllocations,
+    payoutSummary: { methods: methods.map(methodSummary), allocations: normalizedAllocations.map(allocationResponse), inrAmount: formatInrPaise(totalPaise) }
+  };
+}
+
+function digiRequestFingerprint(quoteId, allocations) {
+  return createHash('sha256').update(JSON.stringify(canonical({ quoteId, allocations: allocations || [] }))).digest('hex');
+}
+
+function availableDigiAddress(timestamp = Date.now()) {
+  return db.digirupee.tronAddresses
+    .filter(address => address.enabled && !address.reservedOrderId && Number(address.reservedUntil || 0) <= timestamp)
+    .sort((a, b) => Number(a.lastUsedAt || 0) - Number(b.lastUsedAt || 0))[0] || null;
+}
+
+function sameDigiAllocations(left = [], right = []) {
+  if (left.length !== right.length) return false;
+  return left.every((item, index) => item.payoutMethodId === right[index].payoutMethodId && Number(item.inrPaise) === Number(right[index].inrPaise));
 }
 
 function auth(req) {
@@ -877,6 +1258,148 @@ function validDigiAmount(value, minimum = 0.01, maximum = 1_000_000) {
 }
 
 async function digirupeeApi(req, res, path) {
+  if (req.method === 'GET' && path === '/payout-methods') {
+    const { user } = digirupeeAuth(req);
+    return send(res, 200, { payoutMethods: db.digirupee.payoutMethods.filter(method => method.userId === user.id).sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt)).map(publicDigiPayoutMethod) });
+  }
+
+  if (req.method === 'POST' && path === '/payout-methods') {
+    const { user } = digirupeeAuth(req);
+    const b = await body(req);
+    const result = buildPayoutMethod(b);
+    if (result.error) return send(res, 400, { error: result.error });
+    const method = result.method;
+    method.userId = user.id;
+    const duplicate = db.digirupee.payoutMethods.some(existing => existing.userId === user.id && (
+      method.type === 'UPI' ? existing.type === 'UPI' && existing.upiId === method.upiId : existing.type === 'BANK' && existing.accountNumber === method.accountNumber && existing.ifsc === method.ifsc
+    ));
+    if (duplicate) return send(res, 409, { error: 'This payout method is already saved' });
+    db.digirupee.payoutMethods.push(method);
+    appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'payout-method.added', entityType: 'payout-method', entityId: method.id, details: { type: method.type, label: method.label, identifier: method.type === 'UPI' ? maskDigiValue(method.upiId, 2, 4) : maskDigiValue(method.accountNumber, 2, 4) } });
+    await persist();
+    return send(res, 201, { payoutMethod: publicDigiPayoutMethod(method) });
+  }
+
+  if (req.method === 'PATCH' && /^\/payout-methods\/[A-Za-z0-9_-]+$/.test(path)) {
+    const { user } = digirupeeAuth(req);
+    const id = path.split('/').pop();
+    const method = findOwnedPayoutMethod(user.id, id);
+    if (!method) return send(res, 404, { error: 'Payout method not found' });
+    if (payoutMethodUsesActiveOrder(method.id)) return send(res, 409, { error: 'This payout method is locked while an active order uses it' });
+    const b = await body(req);
+    if (b.type !== undefined && String(b.type).trim().toUpperCase() !== method.type) return send(res, 400, { error: 'Payout method type cannot be changed' });
+    const result = buildPayoutMethod({ ...b, type: method.type }, method);
+    if (result.error) return send(res, 400, { error: result.error });
+    const duplicate = db.digirupee.payoutMethods.some(existing => existing.id !== method.id && existing.userId === user.id && (
+      result.method.type === 'UPI' ? existing.type === 'UPI' && existing.upiId === result.method.upiId : existing.type === 'BANK' && existing.accountNumber === result.method.accountNumber && existing.ifsc === result.method.ifsc
+    ));
+    if (duplicate) return send(res, 409, { error: 'This payout method is already saved' });
+    Object.assign(method, result.method);
+    appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'payout-method.updated', entityType: 'payout-method', entityId: method.id, details: { type: method.type, label: method.label, identifier: method.type === 'UPI' ? maskDigiValue(method.upiId, 2, 4) : maskDigiValue(method.accountNumber, 2, 4) } });
+    await persist();
+    return send(res, 200, { payoutMethod: publicDigiPayoutMethod(method) });
+  }
+
+  if (req.method === 'PATCH' && /^\/payout-methods\/[A-Za-z0-9_-]+\/status$/.test(path)) {
+    const { user } = digirupeeAuth(req);
+    const id = path.split('/').at(-2);
+    const method = findOwnedPayoutMethod(user.id, id);
+    if (!method) return send(res, 404, { error: 'Payout method not found' });
+    if (payoutMethodUsesActiveOrder(method.id)) return send(res, 409, { error: 'This payout method is locked while an active order uses it' });
+    const b = await body(req);
+    if (typeof b.enabled !== 'boolean') return send(res, 400, { error: 'enabled must be boolean' });
+    method.enabled = b.enabled;
+    method.updatedAt = Date.now();
+    appendDigiAudit({ actorType: 'user', actorId: user.id, action: `payout-method.${b.enabled ? 'enabled' : 'disabled'}`, entityType: 'payout-method', entityId: method.id, details: { type: method.type, label: method.label } });
+    await persist();
+    return send(res, 200, { payoutMethod: publicDigiPayoutMethod(method) });
+  }
+
+  if (req.method === 'DELETE' && /^\/payout-methods\/[A-Za-z0-9_-]+$/.test(path)) {
+    const { user } = digirupeeAuth(req);
+    const id = path.split('/').pop();
+    const method = findOwnedPayoutMethod(user.id, id);
+    if (!method) return send(res, 404, { error: 'Payout method not found' });
+    if (payoutMethodUsesActiveOrder(method.id)) return send(res, 409, { error: 'This payout method is locked while an active order uses it' });
+    db.digirupee.payoutMethods = db.digirupee.payoutMethods.filter(item => item.id !== method.id);
+    appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'payout-method.deleted', entityType: 'payout-method', entityId: method.id, details: { type: method.type, label: method.label } });
+    await persist();
+    return send(res, 200, { ok: true });
+  }
+
+  if (req.method === 'GET' && path === '/admin/tron-addresses') {
+    const admin = adminAuth(req);
+    const expired = expireDigiOrders();
+    if (expired) await persist();
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, tronAddresses: db.digirupee.tronAddresses.map(address => ({ ...publicDigiAddress(address), activeOrderId: address.reservedOrderId || null })) });
+  }
+
+  if (req.method === 'POST' && path === '/admin/tron-addresses') {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
+    const b = await body(req);
+    const address = String(b.address || '').trim();
+    const label = String(b.label || '').trim();
+    if (!isValidTronAddress(address)) return send(res, 400, { error: 'Enter a valid TRON mainnet address' });
+    if (label.length < 1 || label.length > 80) return send(res, 400, { error: 'Address label must be 1 to 80 characters' });
+    if (db.digirupee.tronAddresses.some(item => item.address === address)) return send(res, 409, { error: 'This TRON address is already registered' });
+    const now = Date.now();
+    const record = { id: 'dta_' + randomUUID().replace(/-/g, '').slice(0, 12), address, label, enabled: b.enabled === undefined ? true : b.enabled === true, createdAt: now, updatedAt: now, reservedOrderId: null, reservedUntil: null, lastUsedAt: null, totalOrders: 0, totalUsdtAssigned: 0 };
+    db.digirupee.tronAddresses.push(record);
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'tron-address.added', entityType: 'tron-address', entityId: record.id, details: { address: maskDigiValue(address, 5, 5), label: record.label } });
+    await persist();
+    return send(res, 201, { tronAddress: publicDigiAddress(record) });
+  }
+
+  if (req.method === 'PATCH' && /^\/admin\/tron-addresses\/[A-Za-z0-9_-]+$/.test(path)) {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
+    const id = path.split('/').pop();
+    const record = db.digirupee.tronAddresses.find(item => item.id === id);
+    if (!record) return send(res, 404, { error: 'TRON address not found' });
+    const b = await body(req);
+    const label = b.label === undefined ? record.label : String(b.label || '').trim();
+    const nextAddress = b.address === undefined ? record.address : String(b.address || '').trim();
+    if (label.length < 1 || label.length > 80) return send(res, 400, { error: 'Address label must be 1 to 80 characters' });
+    if (!isValidTronAddress(nextAddress)) return send(res, 400, { error: 'Enter a valid TRON mainnet address' });
+    if (nextAddress !== record.address && (record.reservedOrderId || record.totalOrders > 0)) return send(res, 409, { error: 'A used or reserved TRON address cannot be replaced' });
+    if (db.digirupee.tronAddresses.some(item => item.id !== record.id && item.address === nextAddress)) return send(res, 409, { error: 'This TRON address is already registered' });
+    record.label = label;
+    record.address = nextAddress;
+    record.updatedAt = Date.now();
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'tron-address.updated', entityType: 'tron-address', entityId: record.id, details: { address: maskDigiValue(record.address, 5, 5), label: record.label } });
+    await persist();
+    return send(res, 200, { tronAddress: publicDigiAddress(record) });
+  }
+
+  if (req.method === 'PATCH' && /^\/admin\/tron-addresses\/[A-Za-z0-9_-]+\/status$/.test(path)) {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
+    const id = path.split('/').at(-2);
+    const record = db.digirupee.tronAddresses.find(item => item.id === id);
+    if (!record) return send(res, 404, { error: 'TRON address not found' });
+    const b = await body(req);
+    if (typeof b.enabled !== 'boolean') return send(res, 400, { error: 'enabled must be boolean' });
+    record.enabled = b.enabled;
+    record.updatedAt = Date.now();
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: `tron-address.${b.enabled ? 'enabled' : 'disabled'}`, entityType: 'tron-address', entityId: record.id, details: { address: maskDigiValue(record.address, 5, 5) } });
+    await persist();
+    return send(res, 200, { tronAddress: publicDigiAddress(record) });
+  }
+
+  if (req.method === 'DELETE' && /^\/admin\/tron-addresses\/[A-Za-z0-9_-]+$/.test(path)) {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
+    const id = path.split('/').pop();
+    const record = db.digirupee.tronAddresses.find(item => item.id === id);
+    if (!record) return send(res, 404, { error: 'TRON address not found' });
+    if (record.reservedOrderId || db.digirupee.orders.some(order => order.depositAddressId === record.id)) return send(res, 409, { error: 'A used or reserved TRON address cannot be removed; disable it instead' });
+    db.digirupee.tronAddresses = db.digirupee.tronAddresses.filter(item => item.id !== record.id);
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'tron-address.deleted', entityType: 'tron-address', entityId: record.id, details: { address: maskDigiValue(record.address, 5, 5) } });
+    await persist();
+    return send(res, 200, { ok: true });
+  }
+
   if (req.method === 'GET' && path === '/rates') {
     return send(res, 200, publicDigiConfig());
   }
@@ -984,6 +1507,177 @@ async function digirupeeApi(req, res, path) {
     return send(res, 200, digiUserResponse(user));
   }
 
+  if (req.method === 'POST' && path === '/quotes') {
+    const { user } = digirupeeAuth(req);
+    const expired = expireDigiOrders();
+    if (expired) await persist();
+    const activeOrder = activeDigiOrderForUser(user.id);
+    if (activeOrder) return send(res, 409, { error: 'An active sell order already exists', order: publicDigiOrder(activeOrder) });
+    const b = await body(req);
+    const payoutType = String(b.payoutType || '').trim().toUpperCase();
+    const channelKey = payoutType.toLowerCase();
+    const config = db.digirupee.config;
+    if (!['UPI', 'BANK'].includes(payoutType)) return send(res, 400, { error: 'Payout type must be UPI or BANK' });
+    if (!config.channels[channelKey]) return send(res, 409, { error: `${payoutType} selling is currently disabled` });
+    const usdtMicros = parseUsdtMicros(b.usdtAmount);
+    const minimum = parseUsdtMicros(payoutType === 'UPI' ? config.limits.upiMinUsdt : config.limits.bankMinUsdt);
+    const maximum = parseUsdtMicros(config.limits.globalMaxUsdt);
+    if (!usdtMicros || usdtMicros < minimum || usdtMicros > maximum) return send(res, 400, { error: 'USDT amount is outside the configured order limits' });
+    const ratePaise = rateToPaise(config.rates[channelKey]);
+    if (!ratePaise) return send(res, 503, { error: 'Selling rate is not configured' });
+    const inrPaise = Math.round(usdtMicros * ratePaise / 1_000_000);
+    const payoutMethodIds = Array.isArray(b.payoutMethodIds) ? b.payoutMethodIds : (Array.isArray(b.bankMethodIds) ? b.bankMethodIds : []);
+    const selection = validateDigiPayoutSelection({
+      userId: user.id,
+      payoutType,
+      totalPaise: inrPaise,
+      payoutMethodId: b.payoutMethodId || payoutMethodIds[0],
+      allocations: b.allocations ?? b.payoutAllocations,
+      candidateIds: payoutMethodIds,
+      autoSplit: b.allocations === undefined && b.payoutAllocations === undefined
+    });
+    if (selection.error) return send(res, 400, { error: selection.error });
+    const now = Date.now();
+    const quote = {
+      id: 'dqt_' + randomUUID().replace(/-/g, '').slice(0, 12),
+      userId: user.id,
+      payoutType,
+      payoutMethodId: selection.payoutMethodId,
+      payoutMethodIds: selection.payoutMethodIds,
+      allocations: selection.allocations,
+      payoutSummary: selection.payoutSummary,
+      usdtMicros,
+      ratePaise,
+      inrPaise,
+      createdAt: now,
+      expiresAt: now + Number(config.quoteValiditySeconds) * 1000,
+      status: 'issued'
+    };
+    db.digirupee.quotes.push(quote);
+    appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'quote.created', entityType: 'quote', entityId: quote.id, details: { payoutType, usdtAmount: formatUsdtMicros(usdtMicros), rate: formatInrPaise(ratePaise), inrAmount: formatInrPaise(inrPaise), payoutMethodIds: selection.payoutMethodIds } });
+    await persist();
+    return send(res, 201, { quote: publicDigiQuote(quote) });
+  }
+
+  if (req.method === 'POST' && path === '/orders') {
+    const { user } = digirupeeAuth(req);
+    const expired = expireDigiOrders();
+    if (expired) await persist();
+    const idempotencyKey = String(req.headers['idempotency-key'] || '').trim();
+    if (!/^[A-Za-z0-9_-]{16,100}$/.test(idempotencyKey)) return send(res, 400, { error: 'A valid Idempotency-Key header is required' });
+    const b = await body(req);
+    const quoteId = String(b.quoteId || '').trim();
+    const existing = db.digirupee.orders.find(order => order.userId === user.id && order.idempotencyKey === idempotencyKey);
+    if (existing) {
+      const requestedAllocations = b.allocations === undefined && b.payoutAllocations === undefined ? null : normalizeDigiAllocations(b.allocations ?? b.payoutAllocations);
+      if (existing.quoteId === quoteId && (requestedAllocations === null || sameDigiAllocations(requestedAllocations, existing.allocations))) return send(res, 200, { order: publicDigiOrder(existing), replayed: true });
+      return send(res, 409, { error: 'Idempotency key was already used for a different order request' });
+    }
+    const quote = db.digirupee.quotes.find(item => item.id === quoteId && item.userId === user.id);
+    if (!quote) return send(res, 404, { error: 'Quote not found' });
+    if (quote.status !== 'issued' || Number(quote.expiresAt) <= Date.now()) {
+      quote.status = 'expired';
+      await persist();
+      return send(res, 409, { error: 'Quote has expired; request a new quote' });
+    }
+    const activeOrder = activeDigiOrderForUser(user.id);
+    if (activeOrder) return send(res, 409, { error: 'An active sell order already exists', order: publicDigiOrder(activeOrder) });
+    const submittedAllocations = b.allocations === undefined && b.payoutAllocations === undefined ? null : normalizeDigiAllocations(b.allocations ?? b.payoutAllocations);
+    if ((b.allocations !== undefined || b.payoutAllocations !== undefined) && !submittedAllocations) return send(res, 400, { error: 'Invalid bank allocations' });
+    if (submittedAllocations && !sameDigiAllocations(submittedAllocations, quote.allocations || [])) return send(res, 409, { error: 'Allocations do not match the locked quote' });
+    const selection = validateDigiPayoutSelection({
+      userId: user.id,
+      payoutType: quote.payoutType,
+      totalPaise: quote.inrPaise,
+      payoutMethodId: quote.payoutMethodId,
+      allocations: quote.allocations,
+      candidateIds: quote.payoutMethodIds,
+      autoSplit: false
+    });
+    if (selection.error) return send(res, 400, { error: selection.error });
+    const address = availableDigiAddress();
+    if (!address) return send(res, 409, { error: 'No TRON deposit address is currently available' });
+    const payoutMethodSnapshots = selection.payoutMethodIds.map(id => db.digirupee.payoutMethods.find(method => method.id === id)).filter(Boolean).map(method => ({ ...method }));
+    const now = Date.now();
+    const order = {
+      id: 'dso_' + randomUUID().replace(/-/g, '').slice(0, 12),
+      userId: user.id,
+      quoteId: quote.id,
+      payoutType: quote.payoutType,
+      payoutMethodId: selection.payoutMethodId,
+      payoutMethodIds: selection.payoutMethodIds,
+      allocations: selection.allocations,
+      payoutMethodSnapshots,
+      usdtMicros: quote.usdtMicros,
+      lockedRatePaise: quote.ratePaise,
+      inrPaise: quote.inrPaise,
+      depositAddressId: address.id,
+      depositAddress: address.address,
+      status: 'Awaiting Deposit',
+      createdAt: now,
+      updatedAt: now,
+      quoteExpiresAt: quote.expiresAt,
+      timeline: [{ status: 'Quote Locked', at: now }, { status: 'Awaiting Deposit', at: now }],
+      txId: null,
+      confirmations: 0,
+      payout: null,
+      review: null,
+      idempotencyKey,
+      idempotencyFingerprint: digiRequestFingerprint(quote.id, selection.allocations)
+    };
+    address.reservedOrderId = order.id;
+    address.reservedUntil = quote.expiresAt;
+    address.lastUsedAt = now;
+    address.totalOrders = Number(address.totalOrders || 0) + 1;
+    address.totalUsdtAssigned = Number((Number(address.totalUsdtAssigned || 0) + formatUsdtMicros(order.usdtMicros)).toFixed(6));
+    db.digirupee.orders.push(order);
+    quote.status = 'consumed';
+    quote.consumedOrderId = order.id;
+    appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'order.created', entityType: 'sell-order', entityId: order.id, details: { quoteId: quote.id, payoutType: order.payoutType, usdtAmount: formatUsdtMicros(order.usdtMicros), rate: formatInrPaise(order.lockedRatePaise), inrAmount: formatInrPaise(order.inrPaise), depositAddress: maskDigiValue(address.address, 5, 5), payoutMethodIds: order.payoutMethodIds } });
+    await persist();
+    return send(res, 201, { order: publicDigiOrder(order) });
+  }
+
+  if (req.method === 'GET' && path === '/orders') {
+    const { user } = digirupeeAuth(req);
+    const expired = expireDigiOrders();
+    if (expired) await persist();
+    const status = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`).searchParams.get('status');
+    if (status && !digiActiveStatuses.has(status) && !digiFinalStatuses.has(status)) return send(res, 400, { error: 'Unsupported order status filter' });
+    const orders = db.digirupee.orders.filter(order => order.userId === user.id && (!status || order.status === status)).sort((a, b) => Number(b.createdAt) - Number(a.createdAt)).map(order => publicDigiOrder(order));
+    return send(res, 200, { orders });
+  }
+
+  if (req.method === 'GET' && /^\/orders\/[A-Za-z0-9_-]+$/.test(path)) {
+    const { user } = digirupeeAuth(req);
+    const expired = expireDigiOrders();
+    if (expired) await persist();
+    const id = path.split('/').pop();
+    const order = db.digirupee.orders.find(item => item.id === id && item.userId === user.id);
+    if (!order) return send(res, 404, { error: 'Order not found' });
+    return send(res, 200, { order: publicDigiOrder(order) });
+  }
+
+  if (req.method === 'GET' && path === '/admin/orders') {
+    const admin = adminAuth(req);
+    const expired = expireDigiOrders();
+    if (expired) await persist();
+    const status = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`).searchParams.get('status');
+    if (status && !digiActiveStatuses.has(status) && !digiFinalStatuses.has(status)) return send(res, 400, { error: 'Unsupported order status filter' });
+    const orders = db.digirupee.orders.filter(order => !status || order.status === status).sort((a, b) => Number(b.createdAt) - Number(a.createdAt)).map(order => publicDigiOrder(order, { admin: true }));
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, orders });
+  }
+
+  if (req.method === 'GET' && /^\/admin\/orders\/[A-Za-z0-9_-]+$/.test(path)) {
+    const admin = adminAuth(req);
+    const expired = expireDigiOrders();
+    if (expired) await persist();
+    const id = path.split('/').pop();
+    const order = db.digirupee.orders.find(item => item.id === id);
+    if (!order) return send(res, 404, { error: 'Order not found' });
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, order: publicDigiOrder(order, { admin: true }) });
+  }
+
   if (req.method === 'GET' && path === '/admin/rates') {
     const admin = adminAuth(req);
     return send(res, 200, { admin: { email: admin.email, role: admin.role }, config: publicDigiConfig() });
@@ -997,8 +1691,8 @@ async function digirupeeApi(req, res, path) {
     const rates = b.rates || {};
     const limits = b.limits || {};
     const channels = b.channels || {};
-    const upi = validDigiAmount(rates.upi === undefined ? current.rates.upi : rates.upi, 0.01, 1_000_000);
-    const bank = validDigiAmount(rates.bank === undefined ? current.rates.bank : rates.bank, 0.01, 1_000_000);
+    const upi = rateToPaise(rates.upi === undefined ? current.rates.upi : rates.upi);
+    const bank = rateToPaise(rates.bank === undefined ? current.rates.bank : rates.bank);
     const upiMinUsdt = validDigiAmount(limits.upiMinUsdt === undefined ? current.limits.upiMinUsdt : limits.upiMinUsdt, 0.000001, 1_000_000);
     const bankMinUsdt = validDigiAmount(limits.bankMinUsdt === undefined ? current.limits.bankMinUsdt : limits.bankMinUsdt, 0.000001, 1_000_000);
     const globalMaxUsdt = validDigiAmount(limits.globalMaxUsdt === undefined ? current.limits.globalMaxUsdt : limits.globalMaxUsdt, 0.000001, 1_000_000);
@@ -1012,7 +1706,7 @@ async function digirupeeApi(req, res, path) {
     if (!Number.isInteger(quoteValiditySeconds) || quoteValiditySeconds < 60 || quoteValiditySeconds > 86_400) return send(res, 400, { error: 'Quote validity must be between 60 and 86400 seconds' });
     if (!nextChannels.upi && !nextChannels.bank) return send(res, 400, { error: 'At least one selling channel must be enabled' });
 
-    current.rates = { upi, bank };
+    current.rates = { upi: formatInrPaise(upi), bank: formatInrPaise(bank) };
     current.limits = { upiMinUsdt, bankMinUsdt, globalMaxUsdt };
     current.quoteValiditySeconds = quoteValiditySeconds;
     current.channels = nextChannels;
