@@ -2,6 +2,9 @@ FROM node:22-alpine
 WORKDIR /app
 COPY package.json ./
 COPY website ./website
+COPY scripts ./scripts
+COPY ui ./ui
+COPY android/app/src/main/assets/wtron-parts ./android/app/src/main/assets/wtron-parts
 ENV PORT=3000
 EXPOSE 3000
 CMD ["npm", "start"]
