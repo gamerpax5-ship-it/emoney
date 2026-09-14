@@ -46,6 +46,14 @@ const types = {
   '.json': 'application/json; charset=utf-8'
 };
 
+const indexFile = join(root, 'index.html');
+async function ensureIndexFile() {
+  try {
+    if ((await stat(indexFile)).isFile()) return;
+  } catch {}
+  await import('./assemble-src.mjs');
+}
+
 function legacyHash(v) {
   return createHash('sha256').update(String(v)).digest('hex');
 }
@@ -1156,7 +1164,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     const pathname = decodeURIComponent(url.pathname);
-    let rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+    const nestedAsset = pathname.indexOf('/assets/');
+    let rel = nestedAsset >= 0
+      ? pathname.slice(nestedAsset + 1)
+      : pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
     rel = normalize(rel).replace(/^(\.\.[/\\])+/, '');
     let file = join(root, rel);
 
@@ -1167,7 +1178,8 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, headers(type));
       return res.end(data);
     } catch {
-      const index = await readFile(join(root, 'index.html'));
+      await ensureIndexFile();
+      const index = await readFile(indexFile);
       res.writeHead(200, headers('text/html; charset=utf-8'));
       return res.end(index);
     }

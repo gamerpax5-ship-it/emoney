@@ -4,7 +4,7 @@
   renderWalletHistory(completed);
   renderOrders();
   if ($('ticketList')) {
-    $('ticketList').innerHTML = app.tickets.map(t => `<div class="ticket"><div class="ticket-top"><h4>${escapeHtml(t.type)}</h4><small>${escapeHtml(t.time)}</small></div><p class="small">${escapeHtml(t.text)}</p></div>`).join('') || '<div class="ticket"><div class="ticket-top"><h4>No open tickets</h4><small>-</small></div></div>';
+    $('ticketList').innerHTML = app.tickets.map(t => `<div class="ticket"><div class="ticket-top"><h4>${escapeHtml(t.type)}</h4><span class="badge ${t.status === 'Closed' ? 'sent' : 'review'}">${escapeHtml(t.status || 'Open')}</span></div><small>${escapeHtml(t.time)}${t.orderId ? ` · ${escapeHtml(t.orderId)}` : ''}</small><p class="small">${escapeHtml(t.text)}</p></div>`).join('') || '<div class="ticket"><div class="ticket-top"><h4>No support tickets</h4><small>-</small></div></div>';
   }
   if ($('notificationList')) {
     $('notificationList').innerHTML = app.notifications.map(n => `<div class="ticket" style="margin-bottom:8px"><div class="ticket-top"><h4>${escapeHtml(n.title)}</h4><small>${escapeHtml(n.time)}</small></div><p class="small">${escapeHtml(n.text)}</p></div>`).join('');
@@ -59,6 +59,7 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('focus', () => refreshLiveState().catch(() => {}));
 
+document.querySelector('.side-link[data-page="buy"] .sicon')?.classList.add('usdt-sicon');
 renderActivityCounter();
 loadConfig();
 restoreSession().catch(() => {});

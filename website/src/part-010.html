@@ -53,6 +53,7 @@ async function registerAccount() {
 
 async function logout() {
   try { await api('/auth/logout', { method: 'POST' }); } catch {}
+  stopAutoRefresh();
   app.authenticated = false;
   app.user = null;
   app.wallet = '';
@@ -99,15 +100,29 @@ async function restoreSession() {
 }
 
 async function refreshAccount() {
-  const d = await api('/me');
-  app.authenticated = true;
-  app.user = d.user;
-  app.wallet = d.user.wallet || '';
-  app.orders = d.orders || [];
-  app.tickets = d.tickets || [];
-  app.notifications = d.notifications || [];
-  renderAll();
-  $('lastSync') && ($('lastSync').textContent = 'Synced ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+  if (accountRefreshInFlight) return accountRefreshInFlight;
+  const generation = refreshGeneration;
+  accountRefreshInFlight = (async () => {
+    const d = await api('/me');
+    if (generation !== refreshGeneration) return;
+    app.authenticated = true;
+    app.user = d.user;
+    app.wallet = d.user.wallet || '';
+    app.orders = d.orders || [];
+    app.tickets = d.tickets || [];
+    app.notifications = d.notifications || [];
+    renderAll();
+    $('lastSync') && ($('lastSync').textContent = 'Synced ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+  })().finally(() => { accountRefreshInFlight = null; });
+  return accountRefreshInFlight;
+}
+
+function stopAutoRefresh() {
+  if (liveRefreshTimer) clearInterval(liveRefreshTimer);
+  liveRefreshTimer = null;
+  refreshGeneration += 1;
+  refreshQueued = false;
+  refreshQueuedWithConfig = false;
 }
 
 function showDashPage(id) {
@@ -116,25 +131,44 @@ function showDashPage(id) {
   $(id).classList.add('active');
   document.querySelectorAll('.side-link').forEach(x => x.classList.toggle('active', x.dataset.page === id));
   $('dashTitle').textContent = { overview: 'Overview', buy: 'Buy USDT', orders: 'Orders', wallet: 'Wallet', support: 'Support', account: 'Account' }[id] || id;
-  if (id === 'orders' || id === 'overview' || id === 'wallet' || id === 'support') refreshAccount().catch(() => {});
+  if (id === 'orders' || id === 'overview' || id === 'wallet' || id === 'support') refreshLiveState({ includeConfig: false }).catch(() => {});
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-async function refreshLiveState() {
+async function refreshLiveState({ includeConfig = true } = {}) {
   if (document.hidden) return;
-  await loadConfig(true);
-  if (app.authenticated) await refreshAccount();
+  if (refreshInFlight) {
+    refreshQueued = true;
+    refreshQueuedWithConfig = refreshQueuedWithConfig || includeConfig;
+    return refreshInFlight;
+  }
+  const generation = refreshGeneration;
+  refreshInFlight = (async () => {
+    if (includeConfig) await loadConfig(true);
+    if (generation !== refreshGeneration || document.hidden) return;
+    if (app.authenticated) await refreshAccount();
+  })().finally(() => {
+    refreshInFlight = null;
+    if (refreshQueued) {
+      const queuedWithConfig = refreshQueuedWithConfig;
+      refreshQueued = false;
+      refreshQueuedWithConfig = false;
+      if (!document.hidden) refreshLiveState({ includeConfig: queuedWithConfig }).catch(() => {});
+    }
+  });
+  return refreshInFlight;
 }
 
 function startAutoRefresh() {
-  if (!dashboardRefreshTimer) {
-    dashboardRefreshTimer = setInterval(() => {
-      if (app.authenticated && !document.hidden) refreshAccount().catch(() => {});
-    }, 15000);
-  }
-  if (!configRefreshTimer) {
-    configRefreshTimer = setInterval(() => loadConfig(true).catch(() => {}), 30000);
-  }
+  stopAutoRefresh();
+  const generation = refreshGeneration;
+  refreshTick = 0;
+  liveRefreshTimer = setInterval(() => {
+    if (app.authenticated && !document.hidden && generation === refreshGeneration) {
+      refreshTick += 1;
+      refreshLiveState({ includeConfig: refreshTick % 2 === 0 }).catch(() => {});
+    }
+  }, 15000);
 }
 
 function formatRate() {
@@ -233,6 +267,8 @@ function renderActivityCounter() {
   const value = total.toLocaleString('en-IN');
   if ($('activityCounter')) $('activityCounter').textContent = `${value}+ PLATFORM ACTIVITY`;
   if ($('trustActivityCounter')) $('trustActivityCounter').textContent = `${value}+ platform activity`;
+  if ($('activityFeedCounter')) $('activityFeedCounter').textContent = `${value}+`;
+  if ($('platformActivityStat')) $('platformActivityStat').textContent = `${value}+`;
 }
 
 function toggleAuthMode(mode = 'login') {

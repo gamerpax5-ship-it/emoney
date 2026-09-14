@@ -94,12 +94,12 @@
 <script>
 const $=id=>document.getElementById(id);
 let app={authenticated:false,authMode:'login',user:null,config:null,orders:[],tickets:[],notifications:[],wallet:'',orderFilter:'all',proof:null,pendingOrderKey:''};
-let dashboardRefreshTimer=null,configRefreshTimer=null;
+let liveRefreshTimer=null,refreshInFlight=null,accountRefreshInFlight=null,refreshQueued=false,refreshQueuedWithConfig=false,refreshGeneration=0,refreshTick=0;
 const money=n=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(Number(n||0));
 const num=n=>new Intl.NumberFormat('en-IN',{maximumFractionDigits:2}).format(Number(n||0));
 
 function toast(message,type='success'){const s=$('toastStack');if(!s)return;const n=document.createElement('div');n.className='toast '+type;n.textContent=message;s.appendChild(n);setTimeout(()=>n.remove(),3400)}
 function showModal(id){$(id)?.classList.add('show')}function closeModal(id){$(id)?.classList.remove('show')}
 function toggleFaq(el){el.parentElement.classList.toggle('open')}
-async function api(path,options={}){const h={'Content-Type':'application/json',...(options.headers||{})};const r=await fetch('/api'+path,{...options,headers:h,credentials:'same-origin'});let data={};try{data=await r.json()}catch{}if(!r.ok){if(r.status===401)app.authenticated=false;const e=new Error(data.error||'Request failed');e.status=r.status;throw e}return data}
+async function api(path,options={}){const h={'Content-Type':'application/json',...(options.headers||{})};const r=await fetch('/api'+path,{...options,headers:h,credentials:'same-origin'});let data={};try{data=await r.json()}catch{}if(!r.ok){if(r.status===401){app.authenticated=false;stopAutoRefresh()}const e=new Error(data.error||'Request failed');e.status=r.status;throw e}return data}
 async function loadConfig(silent=false){try{app.config=await api('/config');$('apiStatus')&&($('apiStatus').textContent='Server connected');applyConfig()}catch(e){$('apiStatus')&&($('apiStatus').textContent='Connection issue');if(!silent)toast(e.message,'error')}}
