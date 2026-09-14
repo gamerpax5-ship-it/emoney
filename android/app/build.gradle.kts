@@ -18,8 +18,8 @@ android {
         applicationId = "com.loktron.tronpay"
         minSdk = 24
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.0.2"
+        versionCode = 4
+        versionName = "1.0.3"
         buildConfigField("String", "WEB_APP_URL", quoted(webAppUrlProvider.get()))
     }
 

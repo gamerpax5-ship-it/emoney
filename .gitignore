@@ -11,5 +11,8 @@ local.properties
 website/index.html
 android/app/src/main/assets/index.html
 
-# Rebuilt from committed WTRON parts by npm run prepare-assets
+# Obsolete executable prototype is deliberately not packaged; hosted app is generated below.
 android/app/src/main/assets/wtron.html
+website/digirupee-app.html
+website/digirupee-app.js
+website/digirupee-qr.js
