@@ -54,18 +54,18 @@
 <div class="wrap navin">
 <a class="brand" href="#home"><img alt="LOKTRON — USDT Purchase Platform" class="loktron-wordmark" src="assets/loktron-logo.svg"/></a>
 <nav class="navlinks"><a href="#features">Features</a><a href="#how">How it works</a><a href="#currencies">Currencies</a><a href="#faq">FAQ</a><a href="#legal">Legal</a></nav>
-<div class="actions"><button class="btn secondary" onclick="openLogin()">Login</button><button class="btn primary" onclick="openLogin(true)">Buy USDT</button></div>
+<div class="actions"><button class="btn secondary" onclick="openLogin()">Sign in</button><button class="btn secondary" onclick="openLogin('register')">Sign up</button><button class="btn primary" onclick="openLogin('register')">Buy USDT</button></div>
 </div>
 </header>
 <main id="publicSite">
 <section class="hero" id="home">
 <div class="wrap hero-grid">
 <div>
-<div class="eyebrow"><span class="dot"></span> INR PURCHASES LIVE · 5,000+ ACTIVE USERS</div>
+<div class="eyebrow"><span class="dot"></span> INR PURCHASES LIVE · <span id="activityCounter">5,000+ PLATFORM ACTIVITY</span></div>
 <h1>Buy USDT with INR on a <span class="gradient-text">clean, tracked platform.</span></h1>
 <p class="lead">LOKTRON gives users a professional purchase portal for INR bank transfer orders. Save your USDT address, pay to the order bank account, submit proof and UTR, and track fulfilment from one dashboard.</p>
-<div class="hero-actions"><button class="btn primary" onclick="openLogin(true)">Start buying USDT</button><a class="btn secondary" href="#how">See how it works</a></div>
-<div class="hero-trust"><span><i>●</i>5,000+ active users</span><span><i>●</i>24×7 order visibility</span><span><i>●</i>INR live now</span></div>
+<div class="hero-actions"><button class="btn primary" onclick="openLogin('register')">Start buying USDT</button><a class="btn secondary" href="#how">See how it works</a></div>
+<div class="hero-trust"><span><i>●</i><span id="trustActivityCounter">5,000+ platform activity</span></span><span><i>●</i>24×7 order visibility</span><span><i>●</i>INR live now</span></div>
 </div>
 <div class="visual">
 <div class="glow"></div><div class="orb one"></div><div class="orb two"></div>

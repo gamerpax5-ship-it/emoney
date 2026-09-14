@@ -4,6 +4,32 @@
 <div class="panel"><div class="panel-head"><h3>USDT received history</h3><span id="walletReceivedTotal">0 USDT</span></div><div id="walletHistory"></div></div>
 </div>
 </section>
+<section class="dash-page" id="support">
+<div class="dashboard-grid">
+<div class="panel panel-3d">
+<div class="panel-head"><h3>Support</h3><span id="supportPanelStatus">Payment, UTR or wallet help</span></div>
+<div class="support-cta">
+<div class="telegram-card">
+<span class="tool-icon">TG</span>
+<div><b>Telegram support</b><small id="supportTelegramValue">Not configured</small></div>
+<button class="btn primary" id="telegramSupportBtn" onclick="openTelegramSupport()">Open Telegram</button>
+</div>
+<div class="notice" id="supportContact">Support details will appear here.</div>
+</div>
+<div class="form-grid">
+<div><span class="label">Order ID</span><input class="input" id="supportOrder" placeholder="Optional"/></div>
+<div><span class="label">Issue type</span><select class="select" id="supportType"><option>Payment not reflected</option><option>Wrong UTR / proof</option><option>Wallet address issue</option><option>General support</option></select></div>
+</div>
+<span class="label" style="margin-top:12px">Message</span>
+<textarea class="textarea" id="supportMessage" placeholder="Explain the issue" rows="4"></textarea>
+<button class="btn primary" onclick="submitSupport()" style="margin-top:12px">Submit ticket</button>
+</div>
+<div class="panel panel-3d">
+<div class="panel-head"><h3>Support history</h3><span>Your latest requests</span></div>
+<div class="support-list" id="ticketList"></div>
+</div>
+</div>
+</section>
 <section class="dash-page" id="account">
 <div class="account-hero-3d">
 <div class="account-orb a1"></div><div class="account-orb a2"></div>
@@ -32,23 +58,6 @@
 <div class="panel panel-3d">
 <div class="panel-head"><h3>Notifications</h3><span>Order &amp; account alerts</span></div>
 <div id="notificationList"></div>
-</div>
-</div>
-<div class="dashboard-grid">
-<div class="panel panel-3d">
-<div class="panel-head"><h3>Support</h3><span id="supportPanelStatus">Payment, UTR or wallet help</span></div>
-<div class="notice" id="supportContact" style="margin-bottom:12px">Support details will appear here.</div>
-<div class="form-grid">
-<div><span class="label">Order ID</span><input class="input" id="supportOrder" placeholder="Optional"/></div>
-<div><span class="label">Issue type</span><select class="select" id="supportType"><option>Payment not reflected</option><option>Wrong UTR / proof</option><option>Wallet address issue</option><option>General support</option></select></div>
-</div>
-<span class="label" style="margin-top:12px">Message</span>
-<textarea class="textarea" id="supportMessage" placeholder="Explain the issue" rows="4"></textarea>
-<button class="btn primary" onclick="submitSupport()" style="margin-top:12px">Submit ticket</button>
-</div>
-<div class="panel panel-3d">
-<div class="panel-head"><h3>Support history</h3><span>Your latest requests</span></div>
-<div class="support-list" id="ticketList"></div>
 </div>
 </div>
 <div class="panel panel-3d legal-inline">
@@ -85,6 +94,7 @@
 <script>
 const $=id=>document.getElementById(id);
 let app={authenticated:false,authMode:'login',user:null,config:null,orders:[],tickets:[],notifications:[],wallet:'',orderFilter:'all',proof:null,pendingOrderKey:''};
+let dashboardRefreshTimer=null,configRefreshTimer=null;
 const money=n=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(Number(n||0));
 const num=n=>new Intl.NumberFormat('en-IN',{maximumFractionDigits:2}).format(Number(n||0));
 
@@ -92,4 +102,4 @@ function toast(message,type='success'){const s=$('toastStack');if(!s)return;cons
 function showModal(id){$(id)?.classList.add('show')}function closeModal(id){$(id)?.classList.remove('show')}
 function toggleFaq(el){el.parentElement.classList.toggle('open')}
 async function api(path,options={}){const h={'Content-Type':'application/json',...(options.headers||{})};const r=await fetch('/api'+path,{...options,headers:h,credentials:'same-origin'});let data={};try{data=await r.json()}catch{}if(!r.ok){if(r.status===401)app.authenticated=false;const e=new Error(data.error||'Request failed');e.status=r.status;throw e}return data}
-async function loadConfig(){try{app.config=await api('/config');$('apiStatus')&&($('apiStatus').textContent='Server connected');applyConfig()}catch(e){$('apiStatus')&&($('apiStatus').textContent='Connection issue');toast(e.message,'error')}}
+async function loadConfig(silent=false){try{app.config=await api('/config');$('apiStatus')&&($('apiStatus').textContent='Server connected');applyConfig()}catch(e){$('apiStatus')&&($('apiStatus').textContent='Connection issue');if(!silent)toast(e.message,'error')}}

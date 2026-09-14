@@ -68,12 +68,13 @@ async function logout() {
 
 async function openDashboard(silent = false) {
   try {
-    await Promise.all([loadConfig(), refreshAccount()]);
+    await Promise.all([loadConfig(true), refreshAccount()]);
     app.authenticated = true;
     $('publicSite').style.display = 'none';
     document.querySelector('.topnav').style.display = 'none';
     $('dashboard').style.display = 'block';
     showDashPage('overview');
+    startAutoRefresh();
     window.scrollTo(0, 0);
     return true;
   } catch (e) {
@@ -114,9 +115,26 @@ function showDashPage(id) {
   document.querySelectorAll('.dash-page').forEach(p => p.classList.remove('active'));
   $(id).classList.add('active');
   document.querySelectorAll('.side-link').forEach(x => x.classList.toggle('active', x.dataset.page === id));
-  $('dashTitle').textContent = { overview: 'Overview', buy: 'Buy USDT', orders: 'Orders', wallet: 'Wallet', account: 'Account' }[id] || id;
-  if (id === 'orders' || id === 'overview' || id === 'wallet') refreshAccount().catch(() => {});
+  $('dashTitle').textContent = { overview: 'Overview', buy: 'Buy USDT', orders: 'Orders', wallet: 'Wallet', support: 'Support', account: 'Account' }[id] || id;
+  if (id === 'orders' || id === 'overview' || id === 'wallet' || id === 'support') refreshAccount().catch(() => {});
   window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function refreshLiveState() {
+  if (document.hidden) return;
+  await loadConfig(true);
+  if (app.authenticated) await refreshAccount();
+}
+
+function startAutoRefresh() {
+  if (!dashboardRefreshTimer) {
+    dashboardRefreshTimer = setInterval(() => {
+      if (app.authenticated && !document.hidden) refreshAccount().catch(() => {});
+    }, 15000);
+  }
+  if (!configRefreshTimer) {
+    configRefreshTimer = setInterval(() => loadConfig(true).catch(() => {}), 30000);
+  }
 }
 
 function formatRate() {
@@ -163,6 +181,12 @@ function applyConfig() {
   if ($('landingSupport')) $('landingSupport').textContent = support.label || 'Online';
   if ($('overviewSupportText')) $('overviewSupportText').textContent = support.telegram ? `${support.telegram} support available` : (support.note || 'Payment, wallet or UTR help');
   if ($('supportPanelStatus')) $('supportPanelStatus').textContent = support.label || 'Payment, UTR or wallet help';
+  const telegramLink = telegramUrl(support.telegram);
+  if ($('supportTelegramValue')) $('supportTelegramValue').textContent = support.telegram || 'Not configured';
+  if ($('telegramSupportBtn')) {
+    $('telegramSupportBtn').disabled = !telegramLink;
+    $('telegramSupportBtn').textContent = telegramLink ? 'Open Telegram' : 'Telegram not set';
+  }
   if ($('supportContact')) {
     const telegram = support.telegram ? `<br><b>Telegram:</b> ${escapeHtml(support.telegram)}` : '';
     $('supportContact').innerHTML = `${escapeHtml(support.note || 'Payment, wallet and UTR support is available.')}${telegram}`;
@@ -183,6 +207,32 @@ function applyConfig() {
   if (paid) paid.placeholder = String(amount?.value || app.config.minInr || 0);
   renderCurrencies();
   calcBuy(false);
+}
+
+function telegramUrl(raw='') {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  if (/^https?:\/\/t\.me\/[A-Za-z0-9_]{3,64}$/i.test(value)) return value;
+  const handle = value.replace(/^@/, '');
+  return /^[A-Za-z0-9_]{3,64}$/.test(handle) ? `https://t.me/${handle}` : '';
+}
+
+function openTelegramSupport() {
+  const url = telegramUrl(app.config?.support?.telegram);
+  if (!url) return toast('Telegram support is not configured yet', 'error');
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+function renderActivityCounter() {
+  const start = Date.UTC(2026, 8, 14);
+  const today = new Date();
+  const utcToday = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const days = Math.max(0, Math.floor((utcToday - start) / 86400000));
+  let total = 5000;
+  for (let i = 0; i <= days; i++) total += 5 + ((i * 7 + 3) % 6);
+  const value = total.toLocaleString('en-IN');
+  if ($('activityCounter')) $('activityCounter').textContent = `${value}+ PLATFORM ACTIVITY`;
+  if ($('trustActivityCounter')) $('trustActivityCounter').textContent = `${value}+ platform activity`;
 }
 
 function toggleAuthMode(mode = 'login') {
@@ -212,7 +262,7 @@ function openLogin(register = false) {
     openDashboard();
     return;
   }
-  toggleAuthMode(register === 'register' ? 'register' : 'login');
+  toggleAuthMode(register === 'register' || register === true ? 'register' : 'login');
   showModal('loginModal');
 }
 

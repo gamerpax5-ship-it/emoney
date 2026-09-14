@@ -54,6 +54,12 @@ document.querySelectorAll('.modal-bg').forEach(m => m.addEventListener('click', 
   if (e.target === m) m.classList.remove('show');
 }));
 
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshLiveState().catch(() => {});
+});
+window.addEventListener('focus', () => refreshLiveState().catch(() => {}));
+
+renderActivityCounter();
 loadConfig();
 restoreSession().catch(() => {});
 </script>
