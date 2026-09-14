@@ -227,27 +227,71 @@
     setText('rlabel', `Rate (${state.type})`); setText('qrate', rates[state.type.toLowerCase()] ? inr(rates[state.type.toLowerCase()]) : '—'); setText('quoteState', state.quote ? `Valid until ${date(state.quote.expiresAt)}` : 'Not locked yet'); setText('qsell', $('amount')?.value ? `${num($('amount').value)} USDT` : '—'); setText('qrecv', 'Request a server quote'); setText('qmethod', state.type === 'UPI' ? (state.methods.find(method => method.id === state.selectedMethodId)?.upiId || 'Select UPI') : 'Server allocation');
     renderAvailability();
   }
-  function quote() { renderSell(); }
+  function quote() { renderSell(); window.__digiAfterSellRender?.(); }
   function selectMethod(id) { state.selectedMethodId = id; state.quote = null; renderSell(); syncQuoteControls(); }
   function toggleBankAllocation(id, checked) { if (checked) state.selectedMethodId = id; else if (state.selectedMethodId === id) state.selectedMethodId = state.methods.find(method => method.type === 'BANK' && method.enabled && method.id !== id)?.id || null; state.quote = null; renderSell(); syncQuoteControls(); }
   function renderAvailability() { const node = $('availabilityList'); if (!node) return; const rows = state.methods.filter(method => method.type === state.type); node.innerHTML = rows.length ? rows.map(method => `<div class="availability-row"><div class="availability-copy"><b>${esc(method.label || method.upiId || 'Payout method')}</b><small>${esc(method.type === 'UPI' ? method.upiId : `•••• ${String(method.accountNumber || '').slice(-4)} · ${method.ifsc || ''}`)}</small><span>${method.enabled ? 'Enabled' : 'Disabled'} · ${inr(method.dailyLimitInr)} daily limit</span></div><button class="toggle ${method.enabled ? 'on' : ''}" onclick="toggleMethod('${esc(method.id)}')" aria-label="${method.enabled ? 'Disable' : 'Enable'}"> </button></div>`).join('') : '<div class="empty compact-empty">No payout methods saved.</div>'; }
 
   async function lockQuote() {
-    const button = $('lockBtn'); if (button) button.disabled = true;
-    try {
-      const usdtAmount = Number($('amount')?.value || 0); if (!usdtAmount || !state.selectedMethodId) throw new Error('Enter an amount and select a payout method');
-      const candidateIds = state.type === 'BANK' ? state.methods.filter(method => method.type === 'BANK' && method.enabled).map(method => method.id) : [state.selectedMethodId];
-      const result = await api('/quotes', { method:'POST', body: JSON.stringify({ payoutType:state.type, usdtAmount, payoutMethodIds:candidateIds }) });
-      state.quote = result.quote;
-      const order = await api('/orders', { method:'POST', headers:{ 'Idempotency-Key': idempotencyKey() }, body: JSON.stringify({ quoteId:state.quote.quoteId, allocations:state.quote.allocations }) });
-      state.orders = [order.order, ...state.orders.filter(item => item.id !== order.order.id)]; state.activeOrderId = order.order.id; state.quote = null; renderAll(); toastMsg('Order created. Send USDT to the assigned address.'); setTimeout(() => $('activeSell')?.scrollIntoView({ behavior:'smooth', block:'start' }), 80);
-    } catch (error) { toastMsg(error.message, true); }
-    finally { if (button) button.disabled = false; }
+    return lockQuoteProduction();
   }
-  async function requestQuoteServer() { const usdtAmount = Number($('amount')?.value || 0); if (!usdtAmount || !state.selectedMethodId) throw new Error('Enter an amount and select a payout method'); const candidateIds = state.type === 'BANK' ? state.methods.filter(method => method.type === 'BANK' && method.enabled).map(method => method.id) : [state.selectedMethodId]; const result = await api('/quotes', { method:'POST', body:JSON.stringify({ payoutType:state.type, usdtAmount, payoutMethodIds:candidateIds }) }); state.quote = result.quote; renderSell(); syncQuoteControls(); toastMsg('Quote locked. Review it and create the sell order.'); }
-  async function createOrderFromQuote() { const result = await api('/orders', { method:'POST', headers:{ 'Idempotency-Key': idempotencyKey() }, body:JSON.stringify({ quoteId:state.quote.quoteId, allocations:state.quote.allocations }) }); state.orders = [result.order, ...state.orders.filter(item => item.id !== result.order.id)]; state.activeOrderId = result.order.id; state.quote = null; renderAll(); toastMsg('Order created. Send USDT to the assigned address.'); setTimeout(() => $('activeSell')?.scrollIntoView({ behavior:'smooth', block:'start' }), 80); }
-  async function lockQuoteProduction() { const button = $('lockBtn'); if (button) button.disabled = true; try { if (!state.quote || Number(state.quote.expiresAt) <= Date.now()) await requestQuoteServer(); else await createOrderFromQuote(); } catch (error) { toastMsg(error.message, true); } finally { if (button) button.disabled = false; } }
-  function syncQuoteControls() { const quote = state.quote && Number(state.quote.expiresAt) > Date.now() ? state.quote : null; if (quote) { setText('qrecv', inr(quote.inrAmount)); setText('qmethod', state.type === 'UPI' ? (state.methods.find(method => method.id === state.selectedMethodId)?.upiId || 'Selected UPI') : `${(quote.allocations || []).length} bank allocation(s)`); } const button = $('lockBtn'); if (button) button.textContent = quote ? 'Create sell order' : 'Lock quote & continue'; }
+  async function requestQuoteServer() {
+    const usdtAmount = Number($('amount')?.value || 0);
+    if (!usdtAmount) throw new Error('Enter a valid USDT amount');
+    const enabled = state.methods.filter(method => method.type === state.type && method.enabled);
+    if (!enabled.length) throw new Error(`Enable at least one ${state.type === 'UPI' ? 'UPI ID' : 'bank account'} first`);
+    const payload = { payoutType:state.type, usdtAmount, payoutMethodIds:enabled.map(method => method.id) };
+    if (state.type === 'BANK') {
+      const allocations = typeof window.__digiGetBankAllocations === 'function' ? window.__digiGetBankAllocations() : [];
+      if (!allocations.length) throw new Error('Allocate the full INR payout across your enabled bank accounts');
+      payload.allocations = allocations;
+    }
+    const result = await api('/quotes', { method:'POST', body:JSON.stringify(payload) });
+    state.quote = result.quote;
+    renderSell();
+    syncQuoteControls();
+    window.__digiAfterSellRender?.();
+    return state.quote;
+  }
+  async function createOrderFromQuote() {
+    if (!state.quote?.quoteId) throw new Error('Quote is unavailable');
+    const orderBody = { quoteId:state.quote.quoteId };
+    if (state.quote.payoutType === 'BANK') orderBody.allocations = state.quote.allocations;
+    const result = await api('/orders', { method:'POST', headers:{ 'Idempotency-Key':idempotencyKey() }, body:JSON.stringify(orderBody) });
+    state.orders = [result.order, ...state.orders.filter(item => item.id !== result.order.id)];
+    state.activeOrderId = result.order.id;
+    state.quote = null;
+    renderAll();
+    toastMsg('Deposit created. Send USDT to the assigned TRON address.');
+    setTimeout(() => document.querySelector('.digi-channel-active')?.scrollIntoView({ behavior:'smooth', block:'start' }), 80);
+    return result.order;
+  }
+  async function lockQuoteProduction() {
+    const button = $('lockBtn');
+    if (button) button.disabled = true;
+    try {
+      state.quote = null;
+      await requestQuoteServer();
+      await createOrderFromQuote();
+    } catch (error) {
+      state.quote = null;
+      toastMsg(error.message, true);
+    } finally {
+      if (button) button.disabled = false;
+      window.__digiAfterSellRender?.();
+    }
+  }
+  function syncQuoteControls() {
+    const quote = state.quote && Number(state.quote.expiresAt) > Date.now() ? state.quote : null;
+    if (quote) {
+      setText('qrecv', inr(quote.inrAmount));
+      setText('qmethod', state.type === 'UPI' ? 'Auto-routed enabled UPI' : `${(quote.allocations || []).length} manual bank allocation(s)`);
+    } else {
+      setText('qmethod', state.type === 'UPI' ? 'Auto route' : 'Manual allocation');
+    }
+    const button = $('lockBtn');
+    if (button) button.textContent = state.type === 'UPI' ? 'Create UPI Deposit' : 'Create Bank Deposit';
+  }
   function idempotencyKey() { const bytes = new Uint8Array(18); crypto.getRandomValues(bytes); return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join(''); }
   function setMax() { const rate = Number(state.rates?.rates?.[state.type.toLowerCase()] || 0); if (!rate) return; const max = Number(state.rates?.limits?.globalMaxUsdt || 0); if ($('amount')) $('amount').value = max; quote(); }
 
