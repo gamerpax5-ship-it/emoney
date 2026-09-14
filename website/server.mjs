@@ -28,7 +28,21 @@ const tronApiUrl = String(process.env.TRON_API_URL || 'https://api.trongrid.io')
 const tronApiKey = String(process.env.TRONGRID_API_KEY || '');
 const tronUsdtContract = String(process.env.TRON_USDT_CONTRACT || 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj');
 const tronVerifyMode = String(process.env.TRON_VERIFY_MODE || (production ? 'required' : 'manual')).toLowerCase();
+const tronNetwork = String(process.env.TRON_NETWORK || 'mainnet').trim().toLowerCase();
+const envNumber = (name, fallback) => Number.isFinite(Number(process.env[name])) ? Number(process.env[name]) : fallback;
+const tronRequiredConfirmations = Math.max(1, Math.min(10_000, envNumber('TRON_REQUIRED_CONFIRMATIONS', 19)));
+const tronPollIntervalMs = Math.max(1_000, Math.min(300_000, envNumber('TRON_POLL_INTERVAL_MS', 15_000)));
+const tronProviderTimeoutMs = Math.max(2_000, Math.min(30_000, envNumber('TRON_PROVIDER_TIMEOUT_MS', 10_000)));
+const tronLateDepositGraceMs = Math.max(60_000, Math.min(7 * 24 * 60 * 60 * 1000, envNumber('TRON_LATE_DEPOSIT_GRACE_MS', 24 * 60 * 60 * 1000)));
+const tronAddressReuseCooldownMs = Math.max(tronLateDepositGraceMs, Math.min(30 * 24 * 60 * 60 * 1000, envNumber('TRON_ADDRESS_REUSE_COOLDOWN_MS', 48 * 60 * 60 * 1000)));
+const tronMockScenario = String(process.env.TRON_MOCK_SCENARIO || 'no-transaction').trim().toLowerCase();
+const tronMockConfirmationSequence = String(process.env.TRON_MOCK_CONFIRMATION_SEQUENCE || '').split(',').map(value => value.trim()).filter(Boolean).map(value => Number(value)).filter(value => Number.isInteger(value) && value >= 0);
+const tronMockConfirmations = Math.max(0, envNumber('TRON_MOCK_CONFIRMATIONS', tronRequiredConfirmations));
 const alertWebhookUrl = String(process.env.ALERT_WEBHOOK_URL || '').trim();
+
+if (production && tronVerifyMode === 'mock') {
+  throw new Error('TRON_VERIFY_MODE=mock is not permitted in production');
+}
 
 if (!process.env.SESSION_SECRET) {
   console.warn('SESSION_SECRET is not configured; sessions will reset when this process restarts.');
@@ -140,6 +154,7 @@ const defaultData = {
     quotes: [],
     orders: [],
     tronAddresses: [],
+    addressAssignments: [],
     auditLog: [],
     sessions: []
   }
@@ -198,6 +213,7 @@ async function loadDb() {
         quotes: Array.isArray((parsed.digirupee || {}).quotes) ? (parsed.digirupee || {}).quotes : [],
         orders: Array.isArray((parsed.digirupee || {}).orders) ? (parsed.digirupee || {}).orders : [],
         tronAddresses: Array.isArray((parsed.digirupee || {}).tronAddresses) ? (parsed.digirupee || {}).tronAddresses : [],
+        addressAssignments: Array.isArray((parsed.digirupee || {}).addressAssignments) ? (parsed.digirupee || {}).addressAssignments : [],
         auditLog: Array.isArray((parsed.digirupee || {}).auditLog) ? (parsed.digirupee || {}).auditLog : [],
         sessions: Array.isArray((parsed.digirupee || {}).sessions) ? (parsed.digirupee || {}).sessions : []
       }
@@ -449,7 +465,7 @@ function publicDigiConfig() {
 
 const digiFinalStatuses = new Set(['Completed', 'Expired', 'Failed', 'Rejected']);
 const digiActiveStatuses = new Set(['Awaiting Deposit', 'Detected', 'Confirming', 'USDT Confirmed', 'INR Processing', 'Late Review']);
-const digiAddressCooldownMs = 5 * 60 * 1000;
+const digiAddressCooldownMs = tronAddressReuseCooldownMs;
 
 function digiOrderIsActive(order) {
   return digiActiveStatuses.has(String(order?.status || '')) && !digiFinalStatuses.has(String(order?.status || ''));
@@ -615,8 +631,15 @@ function releaseDigiAddress(order, timestamp = Date.now()) {
   const address = db.digirupee.tronAddresses.find(item => item.id === order.depositAddressId);
   if (!address || address.reservedOrderId !== order.id) return false;
   address.reservedOrderId = null;
-  address.reservedUntil = timestamp + digiAddressCooldownMs;
+  const safeReuseAt = timestamp + digiAddressCooldownMs;
+  address.reservedUntil = safeReuseAt;
   address.updatedAt = timestamp;
+  const assignment = db.digirupee.addressAssignments.find(item => item.orderId === order.id && item.addressId === address.id);
+  if (assignment) {
+    assignment.releasedAt = timestamp;
+    assignment.safeReuseAt = safeReuseAt;
+    assignment.status = order.status;
+  }
   return true;
 }
 
@@ -665,6 +688,35 @@ function allocationResponse(allocation) {
   return { payoutMethodId: allocation.payoutMethodId, inrAmount: formatInrPaise(allocation.inrPaise) };
 }
 
+function publicDigiPayout(payout, { admin = false } = {}) {
+  if (!payout) return null;
+  return {
+    status: payout.status,
+    totalInrPaise: Number(payout.totalInrPaise || 0),
+    paidInrPaise: Number(payout.paidInrPaise || 0),
+    references: (payout.allocations || []).map(item => ({
+      payoutMethodId: item.payoutMethodId,
+      inrAmount: formatInrPaise(item.inrPaise),
+      mode: item.mode,
+      reference: item.reference,
+      completedAt: item.completedAt
+    })),
+    startedAt: payout.startedAt || null,
+    completedAt: payout.completedAt || null,
+    ...(admin ? { note: payout.note || '', adminId: payout.adminId || null } : {})
+  };
+}
+
+function publicDigiReview(review, { admin = false } = {}) {
+  if (!review) return null;
+  return {
+    reason: review.reason,
+    detectedAt: review.detectedAt,
+    adminDecision: review.adminDecision || null,
+    ...(admin ? { adminNote: review.adminNote || '', txId: review.txId || null } : {})
+  };
+}
+
 function publicDigiOrder(order, { admin = false } = {}) {
   const result = {
     id: order.id,
@@ -683,16 +735,27 @@ function publicDigiOrder(order, { admin = false } = {}) {
     updatedAt: order.updatedAt,
     quoteExpiresAt: order.quoteExpiresAt,
     timeline: Array.isArray(order.timeline) ? order.timeline : [],
-    txId: null,
-    confirmations: 0,
-    payout: null,
-    review: null,
+    txId: order.txId || null,
+    txDetectedAt: order.txDetectedAt || null,
+    txBlockNumber: order.txBlockNumber || null,
+    txTimestamp: order.txTimestamp || null,
+    receivedUsdt: order.receivedUsdtMicros === null || order.receivedUsdtMicros === undefined ? null : formatUsdtMicros(order.receivedUsdtMicros),
+    receivedUsdtDifference: order.receivedUsdtDifferenceMicros === null || order.receivedUsdtDifferenceMicros === undefined ? null : formatUsdtMicros(order.receivedUsdtDifferenceMicros),
+    confirmations: Number(order.confirmations || 0),
+    requiredConfirmations: tronRequiredConfirmations,
+    lastChainCheckAt: order.lastChainCheckAt || null,
+    chainStatus: order.chainStatus || 'unseen',
+    verificationSource: order.verificationSource || null,
+    payout: publicDigiPayout(order.payout, { admin }),
+    review: publicDigiReview(order.review, { admin }),
     payoutMethods: ((order.payoutMethodIds || []).map(id => db.digirupee.payoutMethods.find(method => method.id === id)).filter(Boolean).length
       ? (order.payoutMethodIds || []).map(id => db.digirupee.payoutMethods.find(method => method.id === id)).filter(Boolean)
       : (order.payoutMethodSnapshots || [])).map(method => methodSummary(method))
   };
   if (admin) {
     result.payoutMethods = (order.payoutMethodIds || []).map(id => db.digirupee.payoutMethods.find(method => method.id === id)).filter(Boolean).map(method => ({ ...method }));
+    if (!result.payoutMethods.length && Array.isArray(order.payoutMethodSnapshots)) result.payoutMethods = order.payoutMethodSnapshots.map(method => ({ ...method }));
+    result.chainError = order.chainError || null;
     result.user = publicDigiUser(db.digirupee.users.find(user => user.id === order.userId) || { id: order.userId, profile: {}, email: '', mobile: '', createdAt: null, status: 'unknown' });
   }
   return result;
@@ -811,13 +874,533 @@ function digiRequestFingerprint(quoteId, allocations) {
 
 function availableDigiAddress(timestamp = Date.now()) {
   return db.digirupee.tronAddresses
-    .filter(address => address.enabled && !address.reservedOrderId && Number(address.reservedUntil || 0) <= timestamp)
+    .filter(address => address.enabled && !address.reservedOrderId && Number(address.reservedUntil || 0) <= timestamp && !db.digirupee.addressAssignments.some(assignment => assignment.addressId === address.id && (() => {
+      const assignedOrder = db.digirupee.orders.find(order => order.id === assignment.orderId);
+      return assignedOrder && digiOrderIsActive(assignedOrder);
+    })()))
     .sort((a, b) => Number(a.lastUsedAt || 0) - Number(b.lastUsedAt || 0))[0] || null;
 }
 
 function sameDigiAllocations(left = [], right = []) {
   if (left.length !== right.length) return false;
   return left.every((item, index) => item.payoutMethodId === right[index].payoutMethodId && Number(item.inrPaise) === Number(right[index].inrPaise));
+}
+
+function ensureDigiAddressAssignments() {
+  let changed = false;
+  for (const order of db.digirupee.orders) {
+    if (!order.depositAddressId || !order.depositAddress) continue;
+    if (db.digirupee.addressAssignments.some(item => item.orderId === order.id)) continue;
+    const final = digiFinalStatuses.has(order.status);
+    const safeReuseAt = final ? Number(order.updatedAt || order.quoteExpiresAt || Date.now()) + digiAddressCooldownMs : null;
+    db.digirupee.addressAssignments.push({
+      addressId: order.depositAddressId,
+      address: order.depositAddress,
+      orderId: order.id,
+      userId: order.userId,
+      assignedAt: order.createdAt,
+      quoteExpiresAt: order.quoteExpiresAt,
+      releasedAt: final ? order.updatedAt : null,
+      safeReuseAt,
+      txId: order.txId || null,
+      status: order.status
+    });
+    changed = true;
+  }
+  return changed;
+}
+
+function assignmentForTransfer(addressId, timestamp) {
+  const at = Number(timestamp);
+  if (!Number.isFinite(at) || at <= 0) return null;
+  return db.digirupee.addressAssignments
+    .filter(item => item.addressId === addressId && Number(item.assignedAt) <= at && at <= Number(item.quoteExpiresAt) + tronLateDepositGraceMs)
+    .sort((a, b) => Number(b.assignedAt) - Number(a.assignedAt))[0] || null;
+}
+
+function normalizeDigiTxId(value) {
+  const txId = String(value || '').trim().toLowerCase();
+  return /^[a-f0-9]{64}$/.test(txId) ? txId : '';
+}
+
+function tokenUnitsToMicros(value, decimals = 6) {
+  try {
+    const units = BigInt(String(value));
+    const scale = Number(decimals);
+    if (!Number.isInteger(scale) || scale < 0 || scale > 18 || units < 0n) return null;
+    if (scale === 6) return units <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(units) : null;
+    if (scale > 6) {
+      const divisor = 10n ** BigInt(scale - 6);
+      if (units % divisor !== 0n) return null;
+      const micros = units / divisor;
+      return micros <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(micros) : null;
+    }
+    const micros = units * (10n ** BigInt(6 - scale));
+    return micros <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(micros) : null;
+  } catch {
+    return null;
+  }
+}
+
+function mockDigiTransfer(order, requestedTxId = '') {
+  const scenario = tronMockScenario.replace(/_/g, '-');
+  if (['no-transaction', 'none', 'empty'].includes(scenario)) return null;
+  if (['provider-error', 'error', 'outage'].includes(scenario)) throw Object.assign(new Error('Configured mock provider failure'), { status: 503, provider: true });
+  const txId = normalizeDigiTxId(requestedTxId) || normalizeDigiTxId(process.env.TRON_MOCK_TX_ID) || createHash('sha256').update(`digirupee:${order.id}`).digest('hex');
+  const sequenceValue = tronMockConfirmationSequence.length
+    ? (order.txId ? (tronMockConfirmationSequence.find(value => value > Number(order.confirmations || 0)) ?? tronMockConfirmationSequence.at(-1)) : tronMockConfirmationSequence[0])
+    : tronMockConfirmations;
+  const expected = Number(order.usdtMicros || 0);
+  const configuredDelta = Number(process.env.TRON_MOCK_DELTA_USDT_MICROS || 0);
+  const receivedUsdtMicros = scenario === 'underpayment' || scenario === 'under-paid'
+    ? Math.max(1, expected - (configuredDelta || Math.max(1, Math.floor(expected / 10))))
+    : scenario === 'overpayment' || scenario === 'over-paid'
+      ? expected + (configuredDelta || Math.max(1, Math.floor(expected / 10)))
+      : expected;
+  const timestamp = scenario === 'late' || scenario === 'late-deposit'
+    ? Math.max(Date.now(), Number(order.quoteExpiresAt || Date.now()) + 1)
+    : Date.now() - 1_000;
+  return {
+    txId,
+    contract: ['wrong-token', 'wrong-contract'].includes(scenario) ? 'TMockWrongToken111111111111111111111' : tronUsdtContract,
+    to: ['wrong-address', 'wrong-destination'].includes(scenario) ? 'T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb' : order.depositAddress,
+    receivedUsdtMicros,
+    timestamp,
+    blockNumber: 10_000 + Number(sequenceValue),
+    confirmations: Math.max(0, Number(sequenceValue) || 0),
+    succeeded: !['failed-transaction', 'failed'].includes(scenario),
+    network: tronNetwork,
+    source: 'mock'
+  };
+}
+
+async function fetchTronJson(path, query = {}) {
+  const url = new URL(path.replace(/^\//, ''), `${tronApiUrl}/`);
+  for (const [key, value] of Object.entries(query)) url.searchParams.set(key, String(value));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), tronProviderTimeoutMs);
+  try {
+    const response = await fetch(url, { headers: tronApiKey ? { 'TRON-PRO-API-KEY': tronApiKey } : {}, signal: controller.signal });
+    if (!response.ok) throw Object.assign(new Error(`TRON provider returned HTTP ${response.status}`), { status: response.status, provider: true });
+    const payload = await response.json().catch(() => null);
+    if (!payload || typeof payload !== 'object') throw Object.assign(new Error('TRON provider returned malformed data'), { status: 502, provider: true });
+    return payload;
+  } catch (error) {
+    if (error.name === 'AbortError') throw Object.assign(new Error('TRON provider request timed out'), { status: 504, provider: true });
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function providerTransfer(raw, fallbackTxId = '') {
+  const result = raw?.result || {};
+  const tokenInfo = raw?.token_info || raw?.tokenInfo || {};
+  const eventResult = raw?.result && typeof raw.result === 'object' ? raw.result : {};
+  const txId = normalizeDigiTxId(raw?.transaction_id || raw?.transactionId || raw?.txID || raw?.txid || fallbackTxId);
+  const contract = raw?.contract_address || raw?.contractAddress || tokenInfo.address || raw?.address || '';
+  const to = raw?.to || eventResult.to || eventResult['1'] || '';
+  const rawValue = raw?.value ?? eventResult.value ?? eventResult['2'];
+  const decimals = Number(tokenInfo.decimals ?? raw?.decimals ?? 6);
+  const timestamp = Number(raw?.block_timestamp || raw?.blockTimestamp || raw?.timestamp || 0);
+  return {
+    txId,
+    contract,
+    to,
+    receivedUsdtMicros: tokenUnitsToMicros(rawValue, decimals),
+    timestamp: timestamp > 0 && timestamp < 1_000_000_000_000 ? timestamp * 1_000 : timestamp,
+    blockNumber: Number(raw?.block_number || raw?.blockNumber || raw?.block || 0),
+    decimals,
+    succeeded: true,
+    network: tronNetwork,
+    source: 'trongrid'
+  };
+}
+
+async function loadDigiTransfers(order, requestedTxId = '') {
+  if (tronVerifyMode === 'mock') {
+    const candidate = mockDigiTransfer(order, requestedTxId);
+    return candidate ? [candidate] : [];
+  }
+  if (requestedTxId) {
+    const payload = await fetchTronJson(`/v1/transactions/${encodeURIComponent(requestedTxId)}/events`, { only_confirmed: 'false', limit: 200 });
+    const events = Array.isArray(payload.data) ? payload.data : [];
+    return events.filter(event => String(event.event_name || '').toLowerCase() === 'transfer').map(event => providerTransfer(event, requestedTxId)).filter(item => item.txId);
+  }
+  const payload = await fetchTronJson(`/v1/accounts/${encodeURIComponent(order.depositAddress)}/transactions/trc20`, { only_confirmed: 'false', limit: 200, order_by: 'block_timestamp,desc' });
+  return (Array.isArray(payload.data) ? payload.data : []).map(item => providerTransfer(item)).filter(item => item.txId);
+}
+
+async function hydrateDigiTransfer(candidate) {
+  if (candidate.source === 'mock') return candidate;
+  const payload = await fetchTronJson(`/v1/transactions/${encodeURIComponent(candidate.txId)}`);
+  const tx = Array.isArray(payload.data) ? payload.data[0] : (payload.data || payload);
+  if (!tx || typeof tx !== 'object') throw Object.assign(new Error('TRON transaction was not found'), { status: 404, provider: true });
+  const ret = tx.ret?.[0]?.contractRet || tx.receipt?.result || tx.result?.result;
+  candidate.succeeded = String(ret || '').toUpperCase() === 'SUCCESS';
+  candidate.blockNumber = Number(candidate.blockNumber || tx.blockNumber || tx.block_number || 0);
+  candidate.timestamp = Number(candidate.timestamp || tx.block_timestamp || tx.blockTimestamp || tx.raw_data?.timestamp || 0);
+  if (typeof tx.confirmations === 'number') candidate.confirmations = tx.confirmations;
+  if (tx.confirmed === true) candidate.confirmations = tronRequiredConfirmations;
+  if (!Number.isInteger(candidate.confirmations)) {
+    if (!candidate.blockNumber) return candidate;
+    const head = await fetchTronJson('/wallet/getnowblock');
+    const headNumber = Number(head.block_header?.raw_data?.number || head.blockNumber || 0);
+    if (headNumber) candidate.confirmations = Math.max(0, headNumber - candidate.blockNumber + 1);
+  }
+  return candidate;
+}
+
+function addDigiTimeline(order, label, timestamp = Date.now()) {
+  order.timeline = Array.isArray(order.timeline) ? order.timeline : [];
+  if (order.timeline.some(item => item.status === label)) return false;
+  order.timeline.push({ status: label, at: timestamp });
+  return true;
+}
+
+function setDigiOrderStatus(order, status, timelineLabel = status, timestamp = Date.now()) {
+  let changed = false;
+  if (order.status !== status) {
+    order.status = status;
+    changed = true;
+  }
+  if (addDigiTimeline(order, timelineLabel, timestamp)) changed = true;
+  if (changed) order.updatedAt = timestamp;
+  return changed;
+}
+
+function digiTransactionUsedByAnotherOrder(txId, orderId) {
+  return db.digirupee.orders.find(order => order.id !== orderId && (
+    order.txId === txId || order.review?.txId === txId
+  )) || null;
+}
+
+function syncDigiAssignmentTransaction(order, txId) {
+  const assignment = db.digirupee.addressAssignments.find(item => item.orderId === order.id && item.addressId === order.depositAddressId);
+  if (assignment) {
+    if (!assignment.txId) assignment.txId = txId;
+    assignment.status = order.status;
+  }
+}
+
+function ensureDigiPayoutRecord(order) {
+  if (order.payout) return false;
+  order.payout = {
+    status: 'processing',
+    totalInrPaise: Number(order.inrPaise),
+    paidInrPaise: 0,
+    allocations: [],
+    startedAt: null,
+    completedAt: null,
+    note: '',
+    adminId: null
+  };
+  return true;
+}
+
+function setDigiChainReview(order, candidate, reason, chainStatus, { attachTx = false, auditAction = 'tx.review_required' } = {}) {
+  const now = Date.now();
+  let changed = false;
+  if (attachTx && !order.txId) {
+    order.txId = candidate.txId;
+    syncDigiAssignmentTransaction(order, candidate.txId);
+    changed = true;
+  }
+  if (order.txDetectedAt === null || order.txDetectedAt === undefined) { order.txDetectedAt = now; changed = true; }
+  if (candidate.blockNumber && order.txBlockNumber !== candidate.blockNumber) { order.txBlockNumber = candidate.blockNumber; changed = true; }
+  if (candidate.timestamp && order.txTimestamp !== candidate.timestamp) { order.txTimestamp = candidate.timestamp; changed = true; }
+  if (candidate.receivedUsdtMicros !== null && candidate.receivedUsdtMicros !== undefined && order.receivedUsdtMicros !== candidate.receivedUsdtMicros) { order.receivedUsdtMicros = candidate.receivedUsdtMicros; changed = true; }
+  if (candidate.receivedUsdtMicros !== null && candidate.receivedUsdtMicros !== undefined && order.receivedUsdtDifferenceMicros !== candidate.receivedUsdtMicros - Number(order.usdtMicros)) { order.receivedUsdtDifferenceMicros = candidate.receivedUsdtMicros - Number(order.usdtMicros); changed = true; }
+  if (order.confirmations !== Math.max(0, Number(candidate.confirmations || 0))) { order.confirmations = Math.max(0, Number(candidate.confirmations || 0)); changed = true; }
+  if (order.chainStatus !== chainStatus) { order.chainStatus = chainStatus; changed = true; }
+  if (order.verificationSource !== candidate.source) { order.verificationSource = candidate.source; changed = true; }
+  if (order.lastChainCheckAt !== now) { order.lastChainCheckAt = now; changed = true; }
+  if (order.chainError !== null) { order.chainError = null; changed = true; }
+  const reviewTxId = attachTx ? (order.txId || candidate.txId) : candidate.txId;
+  if (!order.review || order.review.reason !== reason || order.review.txId !== reviewTxId) {
+    order.review = { reason, detectedAt: now, adminDecision: null, adminNote: '', txId: reviewTxId || null };
+    changed = true;
+    appendDigiAudit({ actorType: 'system', actorId: 'tron-monitor', action: auditAction, entityType: 'sell-order', entityId: order.id, details: { reason, txId: reviewTxId || null, expectedUsdt: formatUsdtMicros(order.usdtMicros), receivedUsdt: candidate.receivedUsdtMicros === null || candidate.receivedUsdtMicros === undefined ? null : formatUsdtMicros(candidate.receivedUsdtMicros) } });
+  }
+  if (setDigiOrderStatus(order, 'Late Review', 'Late Review', now)) changed = true;
+  const assignment = db.digirupee.addressAssignments.find(item => item.orderId === order.id);
+  if (assignment) assignment.status = order.status;
+  return changed;
+}
+
+function applyDigiTransfer(order, candidate) {
+  const expectedContract = normalizeTronAddress(tronUsdtContract);
+  const expectedAddress = normalizeTronAddress(order.depositAddress);
+  const candidateContract = normalizeTronAddress(candidate.contract);
+  const candidateAddress = normalizeTronAddress(candidate.to);
+  const destinationMatches = !!candidateAddress && candidateAddress === expectedAddress;
+  const contractMatches = !!candidateContract && candidateContract === expectedContract && Number(candidate.decimals === undefined ? 6 : candidate.decimals) === 6;
+  if (!candidate.txId) return false;
+  const duplicate = digiTransactionUsedByAnotherOrder(candidate.txId, order.id);
+  if (duplicate) return setDigiChainReview(order, candidate, `Transaction is already assigned to order ${duplicate.id}`, 'duplicate_transaction', { attachTx: false, auditAction: 'tx.review_required' });
+  if (candidate.network !== tronNetwork) return setDigiChainReview(order, candidate, 'Transaction network does not match the configured TRON network', 'invalid_network', { attachTx: false });
+  if (!candidate.timestamp || candidate.timestamp > Date.now() + 5 * 60 * 1000 || !candidate.blockNumber || candidate.blockNumber <= 0) return setDigiChainReview(order, candidate, 'Transaction block or timestamp is invalid', 'invalid_chain_data', { attachTx: false });
+  if (!candidate.succeeded) return setDigiChainReview(order, candidate, 'Transaction did not succeed on chain', 'failed_transaction', { attachTx: destinationMatches });
+  if (!destinationMatches) return setDigiChainReview(order, candidate, 'Transaction destination does not match the assigned deposit address', 'wrong_destination', { attachTx: false });
+  if (!contractMatches) return setDigiChainReview(order, candidate, 'Transaction is not an official USDT TRC20 transfer', 'wrong_token', { attachTx: true });
+  if (candidate.receivedUsdtMicros === null || candidate.receivedUsdtMicros === undefined) return setDigiChainReview(order, candidate, 'Transaction token amount is invalid', 'invalid_amount', { attachTx: true });
+  const expected = Number(order.usdtMicros);
+  if (candidate.receivedUsdtMicros !== expected) {
+    const kind = candidate.receivedUsdtMicros < expected ? 'Underpayment' : 'Overpayment';
+    return setDigiChainReview(order, candidate, `${kind}: expected ${formatUsdtMicros(expected)} USDT, received ${formatUsdtMicros(candidate.receivedUsdtMicros)} USDT`, kind === 'Underpayment' ? 'underpayment' : 'overpayment', { attachTx: true });
+  }
+
+  const now = Date.now();
+  let changed = false;
+  const newTransaction = order.txId !== candidate.txId;
+  if (newTransaction) { order.txId = candidate.txId; changed = true; }
+  syncDigiAssignmentTransaction(order, candidate.txId);
+  if (order.txDetectedAt === null || order.txDetectedAt === undefined) { order.txDetectedAt = now; changed = true; }
+  if (order.txBlockNumber !== candidate.blockNumber) { order.txBlockNumber = candidate.blockNumber; changed = true; }
+  if (order.txTimestamp !== candidate.timestamp) { order.txTimestamp = candidate.timestamp; changed = true; }
+  if (order.receivedUsdtMicros !== candidate.receivedUsdtMicros) { order.receivedUsdtMicros = candidate.receivedUsdtMicros; changed = true; }
+  if (order.receivedUsdtDifferenceMicros !== candidate.receivedUsdtMicros - expected) { order.receivedUsdtDifferenceMicros = candidate.receivedUsdtMicros - expected; changed = true; }
+  if (order.confirmations !== Math.max(0, Number(candidate.confirmations || 0))) { order.confirmations = Math.max(0, Number(candidate.confirmations || 0)); changed = true; }
+  if (order.lastChainCheckAt !== now) { order.lastChainCheckAt = now; changed = true; }
+  if (order.chainStatus !== 'valid_exact') { order.chainStatus = 'valid_exact'; changed = true; }
+  if (order.verificationSource !== candidate.source) { order.verificationSource = candidate.source; changed = true; }
+  if (order.chainError !== null) { order.chainError = null; changed = true; }
+  const late = order.status === 'Expired' || candidate.timestamp > Number(order.quoteExpiresAt);
+  if (late) {
+    if (!order.review || order.review.reason !== 'Late deposit received after quote expiry' || order.review.txId !== candidate.txId) {
+      order.review = { reason: 'Late deposit received after quote expiry', detectedAt: now, adminDecision: null, adminNote: '', txId: candidate.txId };
+      appendDigiAudit({ actorType: 'system', actorId: 'tron-monitor', action: 'tx.late_detected', entityType: 'sell-order', entityId: order.id, details: { txId: candidate.txId, expectedUsdt: formatUsdtMicros(expected), receivedUsdt: formatUsdtMicros(candidate.receivedUsdtMicros) } });
+      changed = true;
+    }
+    if (setDigiOrderStatus(order, 'Late Review', 'Late Review', now)) changed = true;
+    const assignment = db.digirupee.addressAssignments.find(item => item.orderId === order.id);
+    if (assignment) assignment.status = order.status;
+    return changed;
+  }
+  if (newTransaction) appendDigiAudit({ actorType: 'system', actorId: 'tron-monitor', action: 'tx.detected', entityType: 'sell-order', entityId: order.id, details: { txId: candidate.txId, expectedUsdt: formatUsdtMicros(expected), receivedUsdt: formatUsdtMicros(candidate.receivedUsdtMicros) } });
+  if (addDigiTimeline(order, 'USDT Detected', now)) changed = true;
+  if (order.status === 'Awaiting Deposit' && setDigiOrderStatus(order, 'Detected', 'USDT Detected', now)) changed = true;
+  if (order.status !== 'USDT Confirmed' && order.status !== 'INR Processing' && addDigiTimeline(order, 'Confirming', now)) changed = true;
+  if (order.confirmations >= tronRequiredConfirmations) {
+    if (order.status !== 'USDT Confirmed' && setDigiOrderStatus(order, 'USDT Confirmed', 'USDT Confirmed', now)) {
+      appendDigiAudit({ actorType: 'system', actorId: 'tron-monitor', action: 'tx.confirmed', entityType: 'sell-order', entityId: order.id, details: { txId: order.txId, confirmations: order.confirmations, requiredConfirmations: tronRequiredConfirmations } });
+      changed = true;
+    }
+    if (setDigiOrderStatus(order, 'INR Processing', 'INR Processing', now)) changed = true;
+    if (ensureDigiPayoutRecord(order)) changed = true;
+  } else if (order.status !== 'INR Processing' && setDigiOrderStatus(order, 'Confirming', 'Confirming', now)) {
+    if (!order.review) appendDigiAudit({ actorType: 'system', actorId: 'tron-monitor', action: 'tx.confirming', entityType: 'sell-order', entityId: order.id, details: { txId: order.txId, confirmations: order.confirmations, requiredConfirmations: tronRequiredConfirmations } });
+    changed = true;
+  }
+  const assignment = db.digirupee.addressAssignments.find(item => item.orderId === order.id);
+  if (assignment) assignment.status = order.status;
+  return changed;
+}
+
+function monitorableDigiOrders(timestamp = Date.now()) {
+  const result = db.digirupee.orders.filter(order => digiOrderIsActive(order));
+  for (const order of db.digirupee.orders) {
+    if (order.status !== 'Expired') continue;
+    const assignment = db.digirupee.addressAssignments.find(item => item.orderId === order.id);
+    if (assignment && Number(assignment.safeReuseAt || 0) > timestamp) result.push(order);
+  }
+  return [...new Map(result.map(order => [order.id, order])).values()];
+}
+
+function markDigiProviderResult(order, chainStatus, chainError = null) {
+  const now = Date.now();
+  let changed = false;
+  if (order.lastChainCheckAt !== now) { order.lastChainCheckAt = now; changed = true; }
+  if (order.chainStatus !== chainStatus) { order.chainStatus = chainStatus; changed = true; }
+  const safeError = chainError ? String(chainError).slice(0, 220) : null;
+  if (order.chainError !== safeError) { order.chainError = safeError; changed = true; }
+  return changed;
+}
+
+async function pollDigiOrder(order) {
+  try {
+    const candidates = await loadDigiTransfers(order, order.txId || '');
+    let changed = false;
+    let matched = false;
+    for (const rawCandidate of candidates) {
+      const candidate = await hydrateDigiTransfer(rawCandidate);
+      const assignment = assignmentForTransfer(order.depositAddressId, candidate.timestamp);
+      if (!assignment) continue;
+      matched = true;
+      const historicalOrder = db.digirupee.orders.find(item => item.id === assignment.orderId);
+      if (historicalOrder && historicalOrder.id !== order.id) {
+        if (digiOrderIsActive(historicalOrder) || historicalOrder.status === 'Expired') changed = applyDigiTransfer(historicalOrder, candidate) || changed;
+        continue;
+      }
+      changed = applyDigiTransfer(order, candidate) || changed;
+    }
+    if (!matched && !order.txId) changed = markDigiProviderResult(order, 'not_found', null) || changed;
+    else if (!matched) changed = markDigiProviderResult(order, order.chainStatus || 'unattributed', null) || changed;
+    return changed;
+  } catch (error) {
+    return markDigiProviderResult(order, 'provider_error', error.message || 'TRON provider unavailable');
+  }
+}
+
+function expectedDigiPayoutAllocations(order) {
+  if (order.payoutType === 'UPI') {
+    return [{ payoutMethodId: order.payoutMethodId, inrPaise: Number(order.inrPaise) }];
+  }
+  return (order.allocations || []).map(item => ({ payoutMethodId: item.payoutMethodId, inrPaise: Number(item.inrPaise) }));
+}
+
+function normalizeDigiPayoutEntries(raw) {
+  const source = Array.isArray(raw?.allocations) && raw.allocations.length
+    ? raw.allocations
+    : [{
+      payoutMethodId: raw?.payoutMethodId,
+      inrAmount: raw?.inrAmount ?? raw?.amount,
+      mode: raw?.mode,
+      reference: raw?.reference ?? raw?.utr
+    }];
+  if (!source.length) return { error: 'At least one payout allocation is required' };
+  const seen = new Set();
+  const entries = [];
+  for (const item of source) {
+    const payoutMethodId = String(item?.payoutMethodId || '').trim();
+    const inrPaise = parseInrPaise(item?.inrPaise ?? item?.inrAmount ?? item?.amount);
+    const mode = String(item?.mode || '').trim().toUpperCase();
+    const reference = String(item?.reference ?? item?.utr ?? '').trim();
+    if (!payoutMethodId || seen.has(payoutMethodId)) return { error: 'Each payout method may appear only once' };
+    if (!Number.isSafeInteger(inrPaise) || inrPaise <= 0) return { error: 'Payout amount must be a positive INR amount' };
+    if (!['UPI', 'IMPS', 'NEFT', 'RTGS', 'BANK'].includes(mode)) return { error: 'Unsupported payout mode' };
+    if (!/^[A-Za-z0-9][A-Za-z0-9/_-]{5,79}$/.test(reference)) return { error: 'Enter a valid payout reference or UTR' };
+    seen.add(payoutMethodId);
+    entries.push({ payoutMethodId, inrPaise, mode, reference });
+  }
+  return { entries };
+}
+
+function payoutReferenceUsedByAnotherOrder(reference, orderId) {
+  const needle = String(reference || '').trim().toLowerCase();
+  return db.digirupee.orders.find(order => order.id !== orderId && (order.payout?.allocations || []).some(item => String(item.reference || '').trim().toLowerCase() === needle)) || null;
+}
+
+function recordDigiPayout(order, admin, raw) {
+  const payoutInput = order.payoutType === 'UPI' && !raw?.allocations && !raw?.payoutMethodId
+    ? { ...raw, payoutMethodId: order.payoutMethodId }
+    : raw;
+  if (order.status === 'Completed' && order.payout) {
+    const replay = normalizeDigiPayoutEntries(payoutInput);
+    const existing = order.payout.allocations || [];
+    if (!replay.error && replay.entries.length === existing.length && replay.entries.every(entry => existing.some(item => item.payoutMethodId === entry.payoutMethodId && item.inrPaise === entry.inrPaise && item.mode === entry.mode && String(item.reference).toLowerCase() === entry.reference.toLowerCase()))) return { ok: true, idempotent: true };
+  }
+  if (!['USDT Confirmed', 'INR Processing'].includes(order.status)) return { status: 409, error: 'This order is not ready for INR payout' };
+  if (!order.txId || order.chainStatus !== 'valid_exact' || Number(order.receivedUsdtMicros) !== Number(order.usdtMicros) || Number(order.confirmations || 0) < tronRequiredConfirmations) {
+    return { status: 409, error: 'A server-verified exact USDT deposit with required confirmations is required' };
+  }
+  const parsed = normalizeDigiPayoutEntries(payoutInput);
+  if (parsed.error) return { status: 400, error: parsed.error };
+  const requestReferences = new Set();
+  for (const entry of parsed.entries) {
+    const referenceKey = entry.reference.toLowerCase();
+    if (requestReferences.has(referenceKey)) return { status: 400, error: 'Each payout allocation must have a unique reference' };
+    requestReferences.add(referenceKey);
+  }
+  const expected = expectedDigiPayoutAllocations(order);
+  const expectedByMethod = new Map(expected.map(item => [item.payoutMethodId, item.inrPaise]));
+  if (parsed.entries.some(item => !expectedByMethod.has(item.payoutMethodId) || expectedByMethod.get(item.payoutMethodId) !== item.inrPaise)) {
+    return { status: 400, error: 'Payout allocations must exactly match the order obligation' };
+  }
+  const methodIds = new Set(expected.map(item => item.payoutMethodId));
+  if (parsed.entries.length > expected.length || parsed.entries.some(item => !methodIds.has(item.payoutMethodId))) return { status: 400, error: 'Payout allocation does not belong to this order' };
+  const payout = order.payout || (order.payout = {
+    status: 'processing', totalInrPaise: Number(order.inrPaise), paidInrPaise: 0, allocations: [], startedAt: null, completedAt: null, note: '', adminId: null
+  });
+  const existingByMethod = new Map((payout.allocations || []).map(item => [item.payoutMethodId, item]));
+  const additions = [];
+  for (const entry of parsed.entries) {
+    const existing = existingByMethod.get(entry.payoutMethodId);
+    if (existing) {
+      if (existing.inrPaise === entry.inrPaise && existing.mode === entry.mode && existing.reference.toLowerCase() === entry.reference.toLowerCase()) continue;
+      return { status: 409, error: 'This payout allocation was already recorded with different details' };
+    }
+    if ((payout.allocations || []).some(item => String(item.reference || '').toLowerCase() === entry.reference.toLowerCase())) return { status: 409, error: 'Payout reference is already used on this order' };
+    const duplicateReference = payoutReferenceUsedByAnotherOrder(entry.reference, order.id);
+    if (duplicateReference) return { status: 409, error: `Payout reference is already used on order ${duplicateReference.id}` };
+    additions.push({ ...entry, completedAt: Date.now(), adminId: admin.email });
+  }
+  if (!additions.length) return { ok: true, idempotent: true };
+  if (order.status === 'USDT Confirmed') setDigiOrderStatus(order, 'INR Processing', 'INR Processing');
+  if (!payout.startedAt) {
+    payout.startedAt = Date.now();
+    payout.adminId = admin.email;
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'payout.started', entityType: 'sell-order', entityId: order.id, details: { amount: formatInrPaise(order.inrPaise) } });
+  }
+  payout.allocations = [...(payout.allocations || []), ...additions];
+  payout.paidInrPaise = payout.allocations.reduce((sum, item) => sum + Number(item.inrPaise || 0), 0);
+  payout.note = String(raw?.note || payout.note || '').trim().slice(0, 300);
+  payout.status = payout.paidInrPaise === Number(payout.totalInrPaise) ? 'completed' : 'processing';
+  payout.adminId = admin.email;
+  order.updatedAt = Date.now();
+  for (const entry of additions) appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'payout.recorded', entityType: 'sell-order', entityId: order.id, details: { payoutMethodId: entry.payoutMethodId, amount: formatInrPaise(entry.inrPaise), mode: entry.mode, reference: entry.reference } });
+  if (payout.status === 'completed') {
+    payout.completedAt = Date.now();
+    setDigiOrderStatus(order, 'Completed', 'Completed', payout.completedAt);
+    releaseDigiAddress(order, payout.completedAt);
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'payout.completed', entityType: 'sell-order', entityId: order.id, details: { amount: formatInrPaise(payout.totalInrPaise), references: additions.map(item => item.reference) } });
+  }
+  return { ok: true, idempotent: false };
+}
+
+function decideDigiReview(order, admin, raw) {
+  if (order.status !== 'Late Review') return { status: 409, error: 'This order is not awaiting review' };
+  const decision = String(raw?.decision || '').trim().toUpperCase();
+  const note = String(raw?.note || raw?.reason || '').trim().slice(0, 500);
+  if (!['APPROVE', 'REJECT'].includes(decision)) return { status: 400, error: 'decision must be APPROVE or REJECT' };
+  if (decision === 'REJECT' && note.length < 3) return { status: 400, error: 'A rejection reason is required' };
+  if (decision === 'APPROVE' && (!order.txId || order.chainStatus !== 'valid_exact' || Number(order.receivedUsdtMicros) !== Number(order.usdtMicros) || Number(order.confirmations || 0) < tronRequiredConfirmations)) {
+    return { status: 409, error: 'Only an independently verified exact deposit with required confirmations can be approved' };
+  }
+  const now = Date.now();
+  order.review = { ...(order.review || {}), adminDecision: decision === 'APPROVE' ? 'approved' : 'rejected', adminNote: note, decidedAt: now, txId: order.review?.txId || order.txId || null };
+  if (decision === 'REJECT') {
+    setDigiOrderStatus(order, 'Rejected', 'Rejected', now);
+    releaseDigiAddress(order, now);
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'tx.review_rejected', entityType: 'sell-order', entityId: order.id, details: { reason: note, txId: order.txId || order.review.txId || null } });
+    return { ok: true };
+  }
+  setDigiOrderStatus(order, 'USDT Confirmed', 'USDT Confirmed', now);
+  appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'tx.review_approved', entityType: 'sell-order', entityId: order.id, details: { txId: order.txId, confirmations: order.confirmations } });
+  setDigiOrderStatus(order, 'INR Processing', 'INR Processing', now);
+  ensureDigiPayoutRecord(order);
+  return { ok: true };
+}
+
+let digiMonitorTimer = null;
+let digiMonitorRunning = false;
+async function runDigiMonitor() {
+  if (digiMonitorRunning) return;
+  digiMonitorRunning = true;
+  try {
+    let changed = expireDigiOrders();
+    for (const order of monitorableDigiOrders()) changed = await pollDigiOrder(order) || changed;
+    if (changed) await persist();
+  } catch (error) {
+    console.warn('digiRupee monitor cycle failed:', error.message);
+  } finally {
+    digiMonitorRunning = false;
+    if (tronVerifyMode === 'required' || tronVerifyMode === 'mock') {
+      digiMonitorTimer = setTimeout(() => {
+        digiMonitorTimer = null;
+        runDigiMonitor();
+      }, tronPollIntervalMs);
+    }
+  }
+}
+
+function startDigiMonitor() {
+  if (tronVerifyMode !== 'required' && tronVerifyMode !== 'mock') return;
+  if (digiMonitorTimer) return;
+  digiMonitorTimer = setTimeout(() => {
+    digiMonitorTimer = null;
+    runDigiMonitor();
+  }, 1_000);
 }
 
 function auth(req) {
@@ -1619,7 +2202,16 @@ async function digirupeeApi(req, res, path) {
       quoteExpiresAt: quote.expiresAt,
       timeline: [{ status: 'Quote Locked', at: now }, { status: 'Awaiting Deposit', at: now }],
       txId: null,
+      txDetectedAt: null,
+      txBlockNumber: null,
+      txTimestamp: null,
+      receivedUsdtMicros: null,
+      receivedUsdtDifferenceMicros: null,
       confirmations: 0,
+      lastChainCheckAt: null,
+      chainStatus: 'unseen',
+      chainError: null,
+      verificationSource: null,
       payout: null,
       review: null,
       idempotencyKey,
@@ -1630,6 +2222,18 @@ async function digirupeeApi(req, res, path) {
     address.lastUsedAt = now;
     address.totalOrders = Number(address.totalOrders || 0) + 1;
     address.totalUsdtAssigned = Number((Number(address.totalUsdtAssigned || 0) + formatUsdtMicros(order.usdtMicros)).toFixed(6));
+    db.digirupee.addressAssignments.push({
+      addressId: address.id,
+      address: address.address,
+      orderId: order.id,
+      userId: order.userId,
+      assignedAt: now,
+      quoteExpiresAt: order.quoteExpiresAt,
+      releasedAt: null,
+      safeReuseAt: null,
+      txId: null,
+      status: order.status
+    });
     db.digirupee.orders.push(order);
     quote.status = 'consumed';
     quote.consumedOrderId = order.id;
@@ -1658,6 +2262,37 @@ async function digirupeeApi(req, res, path) {
     return send(res, 200, { order: publicDigiOrder(order) });
   }
 
+  if (req.method === 'POST' && /^\/orders\/[A-Za-z0-9_-]+\/tx$/.test(path)) {
+    limitRequest(req, 'digirupee-tx-check', 12, 60 * 60 * 1000);
+    const { user } = digirupeeAuth(req);
+    const id = path.split('/').at(-2);
+    const order = db.digirupee.orders.find(item => item.id === id && item.userId === user.id);
+    if (!order) return send(res, 404, { error: 'Order not found' });
+    if (['Completed', 'Failed', 'Rejected'].includes(order.status)) return send(res, 409, { error: 'This order cannot accept a transaction check' });
+    const b = await body(req);
+    const txId = normalizeDigiTxId(b.txId || b.txid || b.transactionId);
+    if (!txId) return send(res, 400, { error: 'Enter a valid 64-character transaction hash' });
+    try {
+      const candidates = await loadDigiTransfers(order, txId);
+      let changed = false;
+      let matched = false;
+      for (const rawCandidate of candidates) {
+        const candidate = await hydrateDigiTransfer(rawCandidate);
+        const assignment = assignmentForTransfer(order.depositAddressId, candidate.timestamp);
+        if (!assignment || assignment.orderId !== order.id) continue;
+        matched = true;
+        changed = applyDigiTransfer(order, candidate) || changed;
+      }
+      if (!matched) changed = markDigiProviderResult(order, 'not_found', null) || changed;
+      if (changed) await persist();
+      return send(res, matched ? 200 : 202, { order: publicDigiOrder(order), checked: true, matched });
+    } catch (error) {
+      markDigiProviderResult(order, 'provider_error', error.message || 'TRON provider unavailable');
+      await persist();
+      return send(res, error.status && error.status >= 500 ? error.status : 503, { error: 'TRON verification is temporarily unavailable; please retry' });
+    }
+  }
+
   if (req.method === 'GET' && path === '/admin/orders') {
     const admin = adminAuth(req);
     const expired = expireDigiOrders();
@@ -1676,6 +2311,68 @@ async function digirupeeApi(req, res, path) {
     const order = db.digirupee.orders.find(item => item.id === id);
     if (!order) return send(res, 404, { error: 'Order not found' });
     return send(res, 200, { admin: { email: admin.email, role: admin.role }, order: publicDigiOrder(order, { admin: true }) });
+  }
+
+  if (req.method === 'GET' && path === '/admin/deposits') {
+    const admin = adminAuth(req);
+    const expired = expireDigiOrders();
+    if (expired) await persist();
+    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    const status = url.searchParams.get('status');
+    const statuses = new Set(['Awaiting Deposit', 'Detected', 'Confirming', 'Late Review', 'USDT Confirmed']);
+    if (status && !statuses.has(status)) return send(res, 400, { error: 'Unsupported deposit status filter' });
+    const deposits = db.digirupee.orders
+      .filter(order => statuses.has(order.status) && (!status || order.status === status))
+      .sort((a, b) => Number(b.createdAt) - Number(a.createdAt))
+      .map(order => publicDigiOrder(order, { admin: true }));
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, requiredConfirmations: tronRequiredConfirmations, deposits });
+  }
+
+  if (req.method === 'GET' && path === '/admin/payouts') {
+    const admin = adminAuth(req);
+    const expired = expireDigiOrders();
+    if (expired) await persist();
+    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    const status = String(url.searchParams.get('status') || '').trim();
+    const allowed = new Set(['USDT Confirmed', 'INR Processing', 'Completed']);
+    if (status && !allowed.has(status)) return send(res, 400, { error: 'Unsupported payout status filter' });
+    const payouts = db.digirupee.orders
+      .filter(order => allowed.has(order.status) && (!status || order.status === status))
+      .sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt))
+      .map(order => publicDigiOrder(order, { admin: true }));
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, payouts });
+  }
+
+  if (req.method === 'GET' && /^\/admin\/payouts\/[A-Za-z0-9_-]+$/.test(path)) {
+    const admin = adminAuth(req);
+    const id = path.split('/').pop();
+    const order = db.digirupee.orders.find(item => item.id === id);
+    if (!order) return send(res, 404, { error: 'Order not found' });
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, payout: publicDigiOrder(order, { admin: true }) });
+  }
+
+  if (req.method === 'POST' && /^\/admin\/orders\/[A-Za-z0-9_-]+\/payout$/.test(path)) {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
+    const id = path.split('/').at(-2);
+    const order = db.digirupee.orders.find(item => item.id === id);
+    if (!order) return send(res, 404, { error: 'Order not found' });
+    const result = recordDigiPayout(order, admin, await body(req));
+    if (result.error) return send(res, result.status || 400, { error: result.error });
+    if (!result.idempotent) await persist();
+    return send(res, 200, { order: publicDigiOrder(order, { admin: true }), idempotent: !!result.idempotent });
+  }
+
+  if (req.method === 'POST' && /^\/admin\/orders\/[A-Za-z0-9_-]+\/review$/.test(path)) {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
+    const id = path.split('/').at(-2);
+    const order = db.digirupee.orders.find(item => item.id === id);
+    if (!order) return send(res, 404, { error: 'Order not found' });
+    const result = decideDigiReview(order, admin, await body(req));
+    if (result.error) return send(res, result.status || 400, { error: result.error });
+    await persist();
+    return send(res, 200, { order: publicDigiOrder(order, { admin: true }) });
   }
 
   if (req.method === 'GET' && path === '/admin/rates') {
@@ -2172,7 +2869,8 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === '/health' || url.pathname === '/ready') {
       const persistenceConfigured = !!(process.env.LOKTRON_SUPABASE_URL && process.env.LOKTRON_SUPABASE_KEY && process.env.LOKTRON_PERSISTENCE_SECRET);
-      const ready = auditHealthy() && (!production || (!!process.env.SESSION_SECRET && adminConfigured && persistenceConfigured && tronVerifyMode === 'required'));
+      const chainConfigurationReady = tronVerifyMode === 'required' && !!tronApiKey && isValidTronAddress(tronUsdtContract);
+      const ready = auditHealthy() && (!production || (!!process.env.SESSION_SECRET && adminConfigured && persistenceConfigured && chainConfigurationReady));
       const strict = url.pathname === '/ready';
       return send(res, strict && !ready ? 503 : 200, {
         ok: true,
@@ -2191,6 +2889,8 @@ const server = http.createServer(async (req, res) => {
           adminConfigured,
           persistenceConfigured,
           tronRequired: tronVerifyMode === 'required',
+          tronApiKeyConfigured: !!tronApiKey,
+          tronContractConfigured: isValidTronAddress(tronUsdtContract),
           auditHealthy: auditHealthy()
         }
       });
@@ -2234,6 +2934,9 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+if (ensureDigiAddressAssignments()) await persist();
+
 server.listen(port, '0.0.0.0', () => {
   console.log(`LOKTRON website listening on ${port}`);
+  startDigiMonitor();
 });
