@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import {
   randomBytes,
   randomUUID,
+  randomInt,
   createHash,
   createHmac,
   scryptSync,
@@ -147,7 +148,8 @@ const defaultData = {
       limits: { upiMinUsdt: 1000, bankMinUsdt: 5000, globalMaxUsdt: 50000 },
       quoteValiditySeconds: 600,
       channels: { upi: true, bank: true },
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      referrals: { enabled: true, inviterRewardUsdt: 10, referredRewardUsdt: 0, minimumCompletedUsdt: 0 }
     },
     users: [],
     payoutMethods: [],
@@ -155,6 +157,13 @@ const defaultData = {
     orders: [],
     tronAddresses: [],
     addressAssignments: [],
+    rewards: [],
+    rewardLedger: [],
+    campaigns: [],
+    taskClaims: [],
+    wheelConfig: { enabled: false, dailyClaimLimit: 1, segments: [], updatedAt: Date.now() },
+    wheelClaims: [],
+    referrals: [],
     auditLog: [],
     sessions: []
   }
@@ -206,6 +215,10 @@ async function loadDb() {
           channels: {
             ...structuredClone(defaultData.digirupee.config.channels),
             ...(((parsed.digirupee || {}).config || {}).channels || {})
+          },
+          referrals: {
+            ...structuredClone(defaultData.digirupee.config.referrals),
+            ...(((parsed.digirupee || {}).config || {}).referrals || {})
           }
         },
         users: Array.isArray((parsed.digirupee || {}).users) ? (parsed.digirupee || {}).users : [],
@@ -214,6 +227,17 @@ async function loadDb() {
         orders: Array.isArray((parsed.digirupee || {}).orders) ? (parsed.digirupee || {}).orders : [],
         tronAddresses: Array.isArray((parsed.digirupee || {}).tronAddresses) ? (parsed.digirupee || {}).tronAddresses : [],
         addressAssignments: Array.isArray((parsed.digirupee || {}).addressAssignments) ? (parsed.digirupee || {}).addressAssignments : [],
+        rewards: Array.isArray((parsed.digirupee || {}).rewards) ? (parsed.digirupee || {}).rewards : [],
+        rewardLedger: Array.isArray((parsed.digirupee || {}).rewardLedger) ? (parsed.digirupee || {}).rewardLedger : [],
+        campaigns: Array.isArray((parsed.digirupee || {}).campaigns) ? (parsed.digirupee || {}).campaigns : [],
+        taskClaims: Array.isArray((parsed.digirupee || {}).taskClaims) ? (parsed.digirupee || {}).taskClaims : [],
+        wheelConfig: {
+          ...structuredClone(defaultData.digirupee.wheelConfig),
+          ...((parsed.digirupee || {}).wheelConfig || {}),
+          segments: Array.isArray((parsed.digirupee || {}).wheelConfig?.segments) ? (parsed.digirupee || {}).wheelConfig.segments : []
+        },
+        wheelClaims: Array.isArray((parsed.digirupee || {}).wheelClaims) ? (parsed.digirupee || {}).wheelClaims : [],
+        referrals: Array.isArray((parsed.digirupee || {}).referrals) ? (parsed.digirupee || {}).referrals : [],
         auditLog: Array.isArray((parsed.digirupee || {}).auditLog) ? (parsed.digirupee || {}).auditLog : [],
         sessions: Array.isArray((parsed.digirupee || {}).sessions) ? (parsed.digirupee || {}).sessions : []
       }
@@ -434,7 +458,8 @@ function publicDigiUser(user) {
     joinedAt: user.createdAt,
     accountStatus: user.status,
     language: user.profile.language,
-    notificationPreference: user.profile.notificationPreference
+    notificationPreference: user.profile.notificationPreference,
+    referralCode: user.referralCode || null
   };
 }
 
@@ -1346,6 +1371,7 @@ function recordDigiPayout(order, admin, raw) {
     setDigiOrderStatus(order, 'Completed', 'Completed', payout.completedAt);
     releaseDigiAddress(order, payout.completedAt);
     appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'payout.completed', entityType: 'sell-order', entityId: order.id, details: { amount: formatInrPaise(payout.totalInrPaise), references: additions.map(item => item.reference) } });
+    processDigiReferralQualification(order);
   }
   return { ok: true, idempotent: false };
 }
@@ -1888,7 +1914,8 @@ function digiUserAdminSummary(user) {
     activeOrders: activeOrders.length,
     usdtVolume: formatUsdtMicros(orders.reduce((sum, order) => sum + Number(order.usdtMicros || 0), 0)),
     inrSettled: formatInrPaise(paidInrPaise),
-    payoutMethodCount: db.digirupee.payoutMethods.filter(method => method.userId === user.id).length
+    payoutMethodCount: db.digirupee.payoutMethods.filter(method => method.userId === user.id).length,
+    rewardBalance: formatUsdtMicros(rewardBalanceMicros(user.id))
   };
 }
 
@@ -1908,6 +1935,7 @@ function digiOverviewMetrics() {
     pendingPayouts: pendingPayouts.length,
     pendingReviews: orders.filter(order => order.status === 'Late Review').length,
     enabledTronAddresses: db.digirupee.tronAddresses.filter(address => address.enabled).length,
+    rewards: digiRewardMetrics(),
     updatedAt: Date.now()
   };
 }
@@ -1941,6 +1969,187 @@ function digiAddressHistory(addressId) {
 function validDigiAmount(value, minimum = 0.01, maximum = 1_000_000) {
   const amount = Number(value);
   return Number.isFinite(amount) && amount >= minimum && amount <= maximum ? Number(amount.toFixed(6)) : null;
+}
+
+function ensureDigiReferralCodes() {
+  let changed = false;
+  const used = new Set();
+  for (const user of db.digirupee.users) {
+    const existing = String(user.referralCode || '').trim().toUpperCase();
+    if (existing && /^DGR[A-F0-9]{10}$/.test(existing) && !used.has(existing)) { user.referralCode = existing; used.add(existing); continue; }
+    let code = '';
+    do code = `DGR${randomBytes(5).toString('hex').toUpperCase()}`; while (used.has(code));
+    user.referralCode = code;
+    used.add(code);
+    changed = true;
+  }
+  return changed;
+}
+
+function rewardBalanceMicros(userId) {
+  return db.digirupee.rewardLedger.filter(entry => entry.userId === userId && entry.status === 'posted').reduce((sum, entry) => {
+    const amount = Number(entry.amountMicros || 0);
+    return sum + (entry.direction === 'debit' ? -amount : amount);
+  }, 0);
+}
+
+function rewardLedgerPublic(entry) {
+  return {
+    id: entry.id,
+    type: entry.type,
+    amount: formatUsdtMicros(entry.amountMicros),
+    direction: entry.direction,
+    sourceType: entry.sourceType,
+    sourceId: entry.sourceId,
+    description: entry.description,
+    createdAt: entry.createdAt,
+    status: entry.status
+  };
+}
+
+function rewardLedgerAdmin(entry) {
+  const user = db.digirupee.users.find(item => item.id === entry.userId);
+  return { ...rewardLedgerPublic(entry), user: user ? { id: user.id, name: user.profile?.fullName || '', email: user.email } : { id: entry.userId } };
+}
+
+function digiRewardMetrics() {
+  const posted = db.digirupee.rewardLedger.filter(entry => entry.status === 'posted');
+  const credits = posted.filter(entry => entry.direction === 'credit').reduce((sum, entry) => sum + Number(entry.amountMicros || 0), 0);
+  return {
+    totalRewardLiability: formatUsdtMicros(db.digirupee.users.reduce((sum, user) => sum + rewardBalanceMicros(user.id), 0)),
+    totalRewardsIssued: formatUsdtMicros(credits),
+    ledgerEntries: db.digirupee.rewardLedger.length,
+    pendingTaskClaims: db.digirupee.taskClaims.filter(claim => claim.status === 'pending_review').length,
+    wheelSpinsToday: db.digirupee.wheelClaims.filter(claim => claim.dayKey === indiaDayKey()).length
+  };
+}
+
+function issueDigiReward({ userId, amountMicros, type, sourceType, sourceId, description, idempotencyKey = null }) {
+  const amount = Number(amountMicros);
+  if (!Number.isSafeInteger(amount) || amount < 0) return { error: 'Reward amount is invalid' };
+  const existing = db.digirupee.rewardLedger.find(entry => entry.userId === userId && entry.sourceType === sourceType && entry.sourceId === sourceId && entry.status === 'posted');
+  if (existing) return { entry: existing, idempotent: true };
+  if (idempotencyKey) {
+    const byKey = db.digirupee.rewardLedger.find(entry => entry.idempotencyKey === idempotencyKey);
+    if (byKey) return { entry: byKey, idempotent: true };
+  }
+  const now = Date.now();
+  const entry = { id: `drl_${randomUUID().replace(/-/g, '').slice(0, 12)}`, userId, type, amountMicros: amount, direction: 'credit', sourceType, sourceId, description: String(description || '').slice(0, 300), createdAt: now, status: 'posted', idempotencyKey };
+  db.digirupee.rewardLedger.push(entry);
+  db.digirupee.rewards.push({ id: `drw_${randomUUID().replace(/-/g, '').slice(0, 12)}`, userId, ledgerId: entry.id, sourceType, sourceId, amountMicros: amount, direction: 'credit', status: 'posted', createdAt: now });
+  appendDigiAudit({ actorType: 'system', actorId: 'digirupee', action: 'reward.issued', entityType: 'reward', entityId: entry.id, details: { userId, sourceType, sourceId, amount: formatUsdtMicros(amount) } });
+  return { entry, idempotent: false };
+}
+
+function parseDigiDate(value, fallback = null) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const time = typeof value === 'number' ? value : Date.parse(String(value));
+  return Number.isFinite(time) && time > 0 ? time : null;
+}
+
+const digiCampaignTypes = new Set(['TRADE', 'MANUAL_TASK', 'LOGIN', 'PROMOTIONAL']);
+const digiClaimTypes = new Set(['AUTO', 'MANUAL']);
+
+function campaignIsCurrent(campaign, timestamp = Date.now()) {
+  return !!campaign.enabled && Number(campaign.startsAt || 0) <= timestamp && (!campaign.endsAt || Number(campaign.endsAt) >= timestamp);
+}
+
+function taskIsCurrent(task, timestamp = Date.now()) {
+  return !!task.enabled && Number(task.startsAt || 0) <= timestamp && (!task.endsAt || Number(task.endsAt) >= timestamp);
+}
+
+function completedDigiOrders(userId) {
+  return db.digirupee.orders.filter(order => order.userId === userId && order.status === 'Completed');
+}
+
+function evaluateDigiTask(task, userId) {
+  const orders = completedDigiOrders(userId);
+  const req = task.requirements && typeof task.requirements === 'object' ? task.requirements : {};
+  if (task.claimType !== 'AUTO') return { eligible: false, progress: null, reason: 'This task requires admin review' };
+  if (task.campaignType !== 'TRADE' && !Object.keys(req).length) return { eligible: false, progress: null, reason: 'This task has no server-verifiable requirement' };
+  if (req.firstCompletedOrder || (!Object.keys(req).length && task.campaignType === 'TRADE')) return { eligible: orders.length > 0, progress: Math.min(orders.length, 1), target: 1, reason: orders.length ? '' : 'Complete a sell order' };
+  const countTarget = Number(req.completedOrders || req.orderCount || 0);
+  if (Number.isInteger(countTarget) && countTarget > 0) return { eligible: orders.length >= countTarget, progress: Math.min(orders.length, countTarget), target: countTarget, reason: `${countTarget} completed order(s) required` };
+  if (req.minimumCompletedUsdt !== undefined) {
+    const target = parseUsdtMicros(req.minimumCompletedUsdt);
+    const current = orders.reduce((sum, order) => sum + Number(order.usdtMicros || 0), 0);
+    return { eligible: target !== null && current >= target, progress: formatUsdtMicros(current), target: target === null ? null : formatUsdtMicros(target), reason: 'Complete the required USDT volume' };
+  }
+  if (req.minimumOrderUsdt !== undefined) {
+    const target = parseUsdtMicros(req.minimumOrderUsdt);
+    const current = orders.reduce((max, order) => Math.max(max, Number(order.usdtMicros || 0)), 0);
+    return { eligible: target !== null && current >= target, progress: formatUsdtMicros(current), target: target === null ? null : formatUsdtMicros(target), reason: 'Complete an order above the required amount' };
+  }
+  return { eligible: false, progress: null, reason: 'This task requirement is not supported' };
+}
+
+function publicDigiTask(task, userId = null) {
+  const claim = userId ? db.digirupee.taskClaims.find(item => item.userId === userId && item.taskId === task.id) : null;
+  const evaluation = userId ? evaluateDigiTask(task, userId) : null;
+  return {
+    id: task.id, campaignId: task.campaignId, title: task.title, description: task.description,
+    rewardAmount: formatUsdtMicros(task.rewardAmountMicros), enabled: !!task.enabled, claimType: task.claimType,
+    startsAt: task.startsAt, endsAt: task.endsAt, maxClaimsPerUser: task.maxClaimsPerUser,
+    eligibility: evaluation ? { ...evaluation, requirements: undefined } : undefined,
+    claim: claim ? { id: claim.id, status: claim.status, submittedAt: claim.submittedAt, reviewedAt: claim.reviewedAt || null } : null
+  };
+}
+
+function publicDigiCampaign(campaign, userId = null) {
+  return { id: campaign.id, title: campaign.title, description: campaign.description, type: campaign.type, rewardAmount: formatUsdtMicros(campaign.rewardAmountMicros), startsAt: campaign.startsAt, endsAt: campaign.endsAt, enabled: !!campaign.enabled, eligibility: campaign.eligibility || {}, maxClaims: campaign.maxClaims, createdAt: campaign.createdAt, updatedAt: campaign.updatedAt, tasks: (campaign.tasks || []).filter(task => taskIsCurrent(task) || (userId && db.digirupee.taskClaims.some(claim => claim.userId === userId && claim.taskId === task.id))).map(task => publicDigiTask({ ...task, campaignType: campaign.type }, userId)) };
+}
+
+function adminDigiCampaign(campaign) {
+  return { ...publicDigiCampaign(campaign), rewardAmountMicros: campaign.rewardAmountMicros, tasks: (campaign.tasks || []).map(task => ({ ...task, rewardAmount: formatUsdtMicros(task.rewardAmountMicros) })) };
+}
+
+function campaignClaimCount(campaignId) {
+  return db.digirupee.taskClaims.filter(claim => claim.campaignId === campaignId && ['approved', 'credited'].includes(claim.status)).length;
+}
+
+function referralPolicy() {
+  const policy = db.digirupee.config.referrals || {};
+  return { enabled: policy.enabled !== false, inviterRewardUsdt: Number(policy.inviterRewardUsdt || 0), referredRewardUsdt: Number(policy.referredRewardUsdt || 0), minimumCompletedUsdt: Number(policy.minimumCompletedUsdt || 0) };
+}
+
+function referralPublic(referral) {
+  const inviter = db.digirupee.users.find(user => user.id === referral.referrerUserId);
+  const referred = db.digirupee.users.find(user => user.id === referral.referredUserId);
+  return {
+    id: referral.id,
+    inviter: inviter ? { id: inviter.id, name: inviter.profile?.fullName || '', email: inviter.email } : { id: referral.referrerUserId },
+    referred: referred ? { id: referred.id, name: referred.profile?.fullName || '' } : { id: referral.referredUserId },
+    createdAt: referral.createdAt, status: referral.status, qualifiedAt: referral.qualifiedAt || null, qualifyingOrderId: referral.qualifyingOrderId || null,
+    inviterReward: referral.inviterRewardLedgerId ? formatUsdtMicros(db.digirupee.rewardLedger.find(item => item.id === referral.inviterRewardLedgerId)?.amountMicros || 0) : '0',
+    referredReward: referral.referredRewardLedgerId ? formatUsdtMicros(db.digirupee.rewardLedger.find(item => item.id === referral.referredRewardLedgerId)?.amountMicros || 0) : '0'
+  };
+}
+
+function processDigiReferralQualification(order) {
+  if (!order || order.status !== 'Completed') return false;
+  const policy = referralPolicy();
+  if (!policy.enabled) return false;
+  const referral = db.digirupee.referrals.find(item => item.referredUserId === order.userId);
+  if (!referral || referral.status === 'qualified' || referral.status === 'rewarded') return false;
+  const minimum = parseUsdtMicros(policy.minimumCompletedUsdt) || 0;
+  if (Number(order.usdtMicros || 0) < minimum) return false;
+  referral.status = 'qualified';
+  referral.qualifiedAt = Date.now();
+  referral.qualifyingOrderId = order.id;
+  appendDigiAudit({ actorType: 'system', actorId: 'digirupee', action: 'referral.qualified', entityType: 'referral', entityId: referral.id, details: { qualifyingOrderId: order.id } });
+  const inviter = db.digirupee.users.find(user => user.id === referral.referrerUserId);
+  if (inviter && policy.inviterRewardUsdt > 0) {
+    const result = issueDigiReward({ userId: inviter.id, amountMicros: parseUsdtMicros(policy.inviterRewardUsdt), type: 'referral', sourceType: 'referral', sourceId: `${referral.id}:inviter`, description: 'Referral reward for a qualifying completed sell order' });
+    if (result.entry) referral.inviterRewardLedgerId = result.entry.id;
+  }
+  const referred = db.digirupee.users.find(user => user.id === referral.referredUserId);
+  if (referred && policy.referredRewardUsdt > 0) {
+    const result = issueDigiReward({ userId: referred.id, amountMicros: parseUsdtMicros(policy.referredRewardUsdt), type: 'referral', sourceType: 'referral', sourceId: `${referral.id}:referred`, description: 'Referral reward for your first qualifying completed sell order' });
+    if (result.entry) referral.referredRewardLedgerId = result.entry.id;
+  }
+  referral.status = 'rewarded';
+  appendDigiAudit({ actorType: 'system', actorId: 'digirupee', action: 'referral.rewarded', entityType: 'referral', entityId: referral.id, details: { qualifyingOrderId: order.id } });
+  return true;
 }
 
 async function digirupeeApi(req, res, path) {
@@ -2016,6 +2225,319 @@ async function digirupeeApi(req, res, path) {
       pendingPayouts: db.digirupee.orders.filter(order => ['USDT Confirmed', 'INR Processing'].includes(order.status)).length,
       pendingReviews: db.digirupee.orders.filter(order => order.status === 'Late Review').length
     });
+  }
+
+  if (req.method === 'GET' && path === '/rewards') {
+    const { user } = digirupeeAuth(req);
+    const entries = db.digirupee.rewardLedger.filter(entry => entry.userId === user.id).sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
+    const earned = entries.filter(entry => entry.status === 'posted' && entry.direction === 'credit').reduce((sum, entry) => sum + Number(entry.amountMicros || 0), 0);
+    return send(res, 200, { balance: formatUsdtMicros(rewardBalanceMicros(user.id)), lifetimeEarned: formatUsdtMicros(earned), recent: entries.slice(0, 10).map(rewardLedgerPublic) });
+  }
+
+  if (req.method === 'GET' && path === '/rewards/ledger') {
+    const { user } = digirupeeAuth(req);
+    const entries = db.digirupee.rewardLedger.filter(entry => entry.userId === user.id).sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
+    return send(res, 200, { balance: formatUsdtMicros(rewardBalanceMicros(user.id)), ledger: entries.map(rewardLedgerPublic) });
+  }
+
+  if (req.method === 'GET' && path === '/campaigns') {
+    const { user } = digirupeeAuth(req);
+    return send(res, 200, { campaigns: db.digirupee.campaigns.filter(campaign => campaignIsCurrent(campaign)).map(campaign => publicDigiCampaign(campaign, user.id)) });
+  }
+
+  if (req.method === 'GET' && /^\/campaigns\/[A-Za-z0-9_-]+$/.test(path)) {
+    const { user } = digirupeeAuth(req);
+    const id = path.split('/').pop();
+    const campaign = db.digirupee.campaigns.find(item => item.id === id && campaignIsCurrent(item));
+    if (!campaign) return send(res, 404, { error: 'Campaign not found' });
+    return send(res, 200, { campaign: publicDigiCampaign(campaign, user.id) });
+  }
+
+  if (req.method === 'POST' && /^\/campaigns\/[A-Za-z0-9_-]+\/claim$/.test(path)) {
+    const { user } = digirupeeAuth(req);
+    const campaignId = path.split('/').at(-2);
+    const campaign = db.digirupee.campaigns.find(item => item.id === campaignId);
+    if (!campaign || !campaignIsCurrent(campaign)) return send(res, 404, { error: 'Campaign is not currently available' });
+    const b = await body(req);
+    const taskId = String(b.taskId || '').trim();
+    const task = (campaign.tasks || []).find(item => item.id === taskId);
+    if (!task || !taskIsCurrent(task)) return send(res, 400, { error: 'Task is not currently available' });
+    const existing = db.digirupee.taskClaims.find(claim => claim.userId === user.id && claim.taskId === task.id);
+    if (existing) return send(res, 200, { claim: { id: existing.id, status: existing.status }, idempotent: true });
+    if (campaign.maxClaims && campaignClaimCount(campaign.id) >= Number(campaign.maxClaims)) return send(res, 409, { error: 'Campaign claim limit has been reached' });
+    const priorUserClaims = db.digirupee.taskClaims.filter(claim => claim.userId === user.id && claim.taskId === task.id).length;
+    if (task.maxClaimsPerUser && priorUserClaims >= Number(task.maxClaimsPerUser)) return send(res, 409, { error: 'You have reached the claim limit for this task' });
+    const now = Date.now();
+    const claim = { id: `dtc_${randomUUID().replace(/-/g, '').slice(0, 12)}`, campaignId, taskId, userId: user.id, submittedAt: now, note: String(b.note || '').trim().slice(0, 500), status: 'pending_review', reviewedBy: null, reviewedAt: null, adminNote: null, rewardLedgerId: null, idempotencyKey: String(req.headers['idempotency-key'] || '').trim() || null };
+    if (task.claimType === 'AUTO') {
+      const evaluation = evaluateDigiTask({ ...task, campaignType: campaign.type }, user.id);
+      if (!evaluation.eligible) return send(res, 409, { error: evaluation.reason || 'Task requirements are not met', progress: evaluation.progress, target: evaluation.target });
+      const reward = issueDigiReward({ userId: user.id, amountMicros: task.rewardAmountMicros, type: 'task', sourceType: 'task', sourceId: claim.id, description: task.title });
+      if (reward.error) return send(res, 400, { error: reward.error });
+      claim.status = 'credited';
+      claim.rewardLedgerId = reward.entry.id;
+      appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'task.claimed', entityType: 'task-claim', entityId: claim.id, details: { campaignId, taskId, status: claim.status } });
+    } else {
+      claim.status = 'pending_review';
+      appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'task.claimed', entityType: 'task-claim', entityId: claim.id, details: { campaignId, taskId, status: claim.status } });
+    }
+    db.digirupee.taskClaims.push(claim);
+    await persist();
+    return send(res, 201, { claim: { id: claim.id, status: claim.status, submittedAt: claim.submittedAt, reward: claim.rewardLedgerId ? formatUsdtMicros(task.rewardAmountMicros) : '0' } });
+  }
+
+  if (req.method === 'GET' && path === '/wheel') {
+    const { user } = digirupeeAuth(req);
+    const today = indiaDayKey();
+    const claimsToday = db.digirupee.wheelClaims.filter(claim => claim.userId === user.id && claim.dayKey === today);
+    const canSpin = !!db.digirupee.wheelConfig.enabled && claimsToday.length < Number(db.digirupee.wheelConfig.dailyClaimLimit || 1) && db.digirupee.wheelConfig.segments.some(segment => segment.enabled && Number(segment.probabilityWeight) > 0);
+    const previous = claimsToday.at(-1);
+    const next = new Date();
+    next.setHours(24, 0, 0, 0);
+    return send(res, 200, { enabled: !!db.digirupee.wheelConfig.enabled, segments: db.digirupee.wheelConfig.segments.filter(segment => segment.enabled).map(segment => ({ id: segment.id, label: segment.label, rewardAmount: formatUsdtMicros(segment.rewardAmountMicros) })), canSpin, nextEligibleAt: canSpin ? null : next.getTime(), previousResult: previous ? { segmentId: previous.segmentId, label: previous.label, rewardAmount: formatUsdtMicros(previous.rewardAmountMicros), createdAt: previous.createdAt } : null });
+  }
+
+  if (req.method === 'POST' && path === '/wheel/spin') {
+    const { user } = digirupeeAuth(req);
+    const key = String(req.headers['idempotency-key'] || '').trim();
+    if (!/^[A-Za-z0-9_-]{16,100}$/.test(key)) return send(res, 400, { error: 'A valid Idempotency-Key header is required' });
+    const replay = db.digirupee.wheelClaims.find(claim => claim.userId === user.id && claim.idempotencyKey === key);
+    if (replay) return send(res, 200, { result: { segmentId: replay.segmentId, label: replay.label, rewardAmount: formatUsdtMicros(replay.rewardAmountMicros), createdAt: replay.createdAt }, idempotent: true });
+    const config = db.digirupee.wheelConfig;
+    const today = indiaDayKey();
+    if (!config.enabled) return send(res, 409, { error: 'Daily wheel is currently disabled' });
+    if (db.digirupee.wheelClaims.filter(claim => claim.userId === user.id && claim.dayKey === today).length >= Number(config.dailyClaimLimit || 1)) return send(res, 409, { error: 'Your daily wheel claim has already been used' });
+    const segments = config.segments.filter(segment => segment.enabled && Number(segment.probabilityWeight) > 0);
+    const totalWeight = segments.reduce((sum, segment) => sum + Number(segment.probabilityWeight), 0);
+    if (!segments.length || !Number.isSafeInteger(totalWeight) || totalWeight <= 0) return send(res, 409, { error: 'Daily wheel has no enabled reward segments' });
+    const forcedIndex = !production && Number.isInteger(Number(process.env.DIGIRUPEE_TEST_WHEEL_INDEX)) ? Number(process.env.DIGIRUPEE_TEST_WHEEL_INDEX) : null;
+    const draw = forcedIndex === null ? randomInt(totalWeight) : Math.max(0, Math.min(totalWeight - 1, forcedIndex));
+    let cursor = 0;
+    const segment = segments.find(item => (cursor += Number(item.probabilityWeight)) > draw) || segments.at(-1);
+    const now = Date.now();
+    const claim = { id: `dwc_${randomUUID().replace(/-/g, '').slice(0, 12)}`, userId: user.id, dayKey: today, segmentId: segment.id, label: segment.label, rewardAmountMicros: segment.rewardAmountMicros, createdAt: now, idempotencyKey: key };
+    db.digirupee.wheelClaims.push(claim);
+    if (Number(segment.rewardAmountMicros) > 0) issueDigiReward({ userId: user.id, amountMicros: segment.rewardAmountMicros, type: 'wheel', sourceType: 'wheel', sourceId: claim.id, description: `Daily wheel: ${segment.label}` });
+    appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'wheel.spinned', entityType: 'wheel-claim', entityId: claim.id, details: { segmentId: segment.id, dayKey: today } });
+    appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'wheel.claimed', entityType: 'wheel-claim', entityId: claim.id, details: { rewardAmount: formatUsdtMicros(segment.rewardAmountMicros) } });
+    await persist();
+    return send(res, 201, { result: { segmentId: segment.id, label: segment.label, rewardAmount: formatUsdtMicros(segment.rewardAmountMicros), createdAt: now } });
+  }
+
+  if (req.method === 'GET' && path === '/referrals') {
+    const { user } = digirupeeAuth(req);
+    const own = db.digirupee.referrals.filter(referral => referral.referrerUserId === user.id);
+    const origin = configuredOrigins[0] || `${String(req.headers['x-forwarded-proto'] || 'http').split(',')[0]}://${req.headers.host || ''}`;
+    const code = user.referralCode || null;
+    return send(res, 200, { referralCode: code, shareText: code ? `Join digiRupee with referral code ${code}` : null, webUrl: code && origin ? `${origin}/?ref=${encodeURIComponent(code)}` : null, invitedCount: own.length, qualifiedCount: own.filter(item => ['qualified', 'rewarded'].includes(item.status)).length, rewardEarned: formatUsdtMicros(own.reduce((sum, referral) => sum + Number(db.digirupee.rewardLedger.find(entry => entry.id === referral.inviterRewardLedgerId)?.amountMicros || 0), 0)), referrals: own.map(referralPublic) });
+  }
+
+  if (req.method === 'GET' && path === '/admin/rewards') {
+    const admin = adminAuth(req);
+    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    const entries = db.digirupee.rewardLedger.filter(entry => (!url.searchParams.get('userId') || entry.userId === url.searchParams.get('userId')) && (!url.searchParams.get('type') || entry.type === url.searchParams.get('type'))).sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, metrics: digiRewardMetrics(), ledger: entries.slice(0, 500).map(rewardLedgerAdmin) });
+  }
+
+  if (req.method === 'POST' && /^\/admin\/users\/[A-Za-z0-9_-]+\/rewards\/adjust$/.test(path)) {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
+    const userId = path.split('/').at(-3);
+    const user = db.digirupee.users.find(item => item.id === userId);
+    if (!user) return send(res, 404, { error: 'User not found' });
+    const key = String(req.headers['idempotency-key'] || '').trim();
+    if (!/^[A-Za-z0-9_-]{16,100}$/.test(key)) return send(res, 400, { error: 'A valid Idempotency-Key header is required' });
+    const b = await body(req);
+    const amount = parseUsdtMicros(b.amount);
+    const direction = String(b.direction || '').trim().toLowerCase();
+    const reason = String(b.reason || '').trim();
+    if (!amount || amount <= 0 || amount > 1_000_000_000_000) return send(res, 400, { error: 'Enter a valid reward amount' });
+    if (!['credit', 'debit'].includes(direction)) return send(res, 400, { error: 'direction must be credit or debit' });
+    if (reason.length < 3 || reason.length > 300) return send(res, 400, { error: 'A reason between 3 and 300 characters is required' });
+    const prior = db.digirupee.rewardLedger.find(entry => entry.idempotencyKey === key);
+    if (prior) {
+      if (prior.userId !== userId || prior.amountMicros !== amount || prior.direction !== direction || prior.description !== reason) return send(res, 409, { error: 'Idempotency key was already used for a different adjustment' });
+      return send(res, 200, { reward: rewardLedgerAdmin(prior), balance: formatUsdtMicros(rewardBalanceMicros(userId)), idempotent: true });
+    }
+    if (direction === 'debit' && rewardBalanceMicros(userId) < amount) return send(res, 409, { error: 'Reward balance cannot become negative' });
+    const now = Date.now();
+    const entry = { id: `drl_${randomUUID().replace(/-/g, '').slice(0, 12)}`, userId, type: 'admin_adjustment', amountMicros: amount, direction, sourceType: 'admin_adjustment', sourceId: key, description: reason, createdAt: now, status: 'posted', idempotencyKey: key, adminId: admin.email };
+    db.digirupee.rewardLedger.push(entry);
+    db.digirupee.rewards.push({ id: `drw_${randomUUID().replace(/-/g, '').slice(0, 12)}`, userId, ledgerId: entry.id, sourceType: 'admin_adjustment', sourceId: key, amountMicros: amount, direction, status: 'posted', createdAt: now });
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'reward.adjusted', entityType: 'reward', entityId: entry.id, details: { userId, amount: formatUsdtMicros(amount), direction, reason } });
+    await persist();
+    return send(res, 201, { reward: rewardLedgerAdmin(entry), balance: formatUsdtMicros(rewardBalanceMicros(userId)) });
+  }
+
+  if (req.method === 'GET' && path === '/admin/campaigns') {
+    const admin = adminAuth(req);
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, campaigns: db.digirupee.campaigns.map(adminDigiCampaign).sort((a, b) => Number(b.createdAt) - Number(a.createdAt)) });
+  }
+
+  if (req.method === 'POST' && path === '/admin/campaigns') {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
+    const b = await body(req);
+    const title = String(b.title || '').trim();
+    const description = String(b.description || '').trim();
+    const type = String(b.type || '').trim().toUpperCase();
+    const rewardAmountMicros = parseUsdtMicros(b.rewardAmount || b.rewardAmountUsdt || '0');
+    const startsAt = parseDigiDate(b.startsAt, Date.now());
+    const endsAt = parseDigiDate(b.endsAt, null);
+    const maxClaims = b.maxClaims === undefined || b.maxClaims === null || b.maxClaims === '' ? null : Number(b.maxClaims);
+    if (title.length < 2 || title.length > 120 || description.length > 500 || !digiCampaignTypes.has(type) || rewardAmountMicros === null || rewardAmountMicros < 0 || startsAt === null || (endsAt !== null && endsAt < startsAt) || (maxClaims !== null && (!Number.isInteger(maxClaims) || maxClaims < 0))) return send(res, 400, { error: 'Campaign fields are invalid' });
+    const now = Date.now();
+    const campaign = { id: `dca_${randomUUID().replace(/-/g, '').slice(0, 12)}`, title, description, type, rewardAmountMicros, startsAt, endsAt, enabled: b.enabled === undefined ? true : b.enabled === true, eligibility: b.eligibility && typeof b.eligibility === 'object' ? b.eligibility : {}, maxClaims, createdAt: now, updatedAt: now, tasks: [] };
+    db.digirupee.campaigns.push(campaign);
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'campaign.created', entityType: 'campaign', entityId: campaign.id, details: { title, type, rewardAmount: formatUsdtMicros(rewardAmountMicros) } });
+    await persist();
+    return send(res, 201, { campaign: adminDigiCampaign(campaign) });
+  }
+
+  if (req.method === 'PATCH' && /^\/admin\/campaigns\/[A-Za-z0-9_-]+$/.test(path)) {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
+    const campaign = db.digirupee.campaigns.find(item => item.id === path.split('/').pop());
+    if (!campaign) return send(res, 404, { error: 'Campaign not found' });
+    const b = await body(req);
+    const next = { ...campaign };
+    if (b.title !== undefined) next.title = String(b.title || '').trim();
+    if (b.description !== undefined) next.description = String(b.description || '').trim();
+    if (b.type !== undefined) next.type = String(b.type || '').trim().toUpperCase();
+    if (b.rewardAmount !== undefined || b.rewardAmountUsdt !== undefined) next.rewardAmountMicros = parseUsdtMicros(b.rewardAmount ?? b.rewardAmountUsdt);
+    if (b.startsAt !== undefined) next.startsAt = parseDigiDate(b.startsAt);
+    if (b.endsAt !== undefined) next.endsAt = parseDigiDate(b.endsAt, null);
+    if (b.eligibility !== undefined) next.eligibility = b.eligibility && typeof b.eligibility === 'object' ? b.eligibility : {};
+    if (b.maxClaims !== undefined) next.maxClaims = b.maxClaims === null || b.maxClaims === '' ? null : Number(b.maxClaims);
+    if (typeof b.enabled === 'boolean') next.enabled = b.enabled;
+    if (next.title.length < 2 || next.title.length > 120 || next.description.length > 500 || !digiCampaignTypes.has(next.type) || !Number.isSafeInteger(next.rewardAmountMicros) || next.rewardAmountMicros < 0 || !Number.isFinite(next.startsAt) || (next.endsAt !== null && (!Number.isFinite(next.endsAt) || next.endsAt < next.startsAt)) || (next.maxClaims !== null && (!Number.isInteger(next.maxClaims) || next.maxClaims < 0))) return send(res, 400, { error: 'Campaign fields are invalid' });
+    Object.assign(campaign, next, { updatedAt: Date.now() });
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: campaign.enabled ? 'campaign.updated' : 'campaign.disabled', entityType: 'campaign', entityId: campaign.id, details: { title: campaign.title } });
+    await persist();
+    return send(res, 200, { campaign: adminDigiCampaign(campaign) });
+  }
+
+  if (req.method === 'PATCH' && /^\/admin\/campaigns\/[A-Za-z0-9_-]+\/status$/.test(path)) {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
+    const campaign = db.digirupee.campaigns.find(item => item.id === path.split('/').at(-2));
+    if (!campaign) return send(res, 404, { error: 'Campaign not found' });
+    const b = await body(req);
+    if (typeof b.enabled !== 'boolean') return send(res, 400, { error: 'enabled must be boolean' });
+    campaign.enabled = b.enabled; campaign.updatedAt = Date.now();
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: b.enabled ? 'campaign.updated' : 'campaign.disabled', entityType: 'campaign', entityId: campaign.id, details: { enabled: b.enabled } });
+    await persist();
+    return send(res, 200, { campaign: adminDigiCampaign(campaign) });
+  }
+
+  if (req.method === 'DELETE' && /^\/admin\/campaigns\/[A-Za-z0-9_-]+$/.test(path)) {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner']);
+    const campaign = db.digirupee.campaigns.find(item => item.id === path.split('/').pop());
+    if (!campaign) return send(res, 404, { error: 'Campaign not found' });
+    if (db.digirupee.taskClaims.some(claim => claim.campaignId === campaign.id)) return send(res, 409, { error: 'Campaign has historical claims; disable it instead' });
+    db.digirupee.campaigns = db.digirupee.campaigns.filter(item => item.id !== campaign.id);
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'campaign.disabled', entityType: 'campaign', entityId: campaign.id, details: { deleted: true } });
+    await persist();
+    return send(res, 200, { ok: true });
+  }
+
+  if (req.method === 'POST' && /^\/admin\/campaigns\/[A-Za-z0-9_-]+\/tasks$/.test(path)) {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
+    const campaign = db.digirupee.campaigns.find(item => item.id === path.split('/').at(-2));
+    if (!campaign) return send(res, 404, { error: 'Campaign not found' });
+    const b = await body(req);
+    const task = { id: `dta_${randomUUID().replace(/-/g, '').slice(0, 12)}`, campaignId: campaign.id, title: String(b.title || '').trim(), description: String(b.description || '').trim(), rewardAmountMicros: parseUsdtMicros(b.rewardAmount || b.rewardAmountUsdt || '0'), enabled: b.enabled === undefined ? true : b.enabled === true, claimType: String(b.claimType || 'AUTO').trim().toUpperCase(), requirements: b.requirements && typeof b.requirements === 'object' ? b.requirements : {}, startsAt: parseDigiDate(b.startsAt, campaign.startsAt), endsAt: parseDigiDate(b.endsAt, campaign.endsAt), maxClaimsPerUser: b.maxClaimsPerUser === undefined || b.maxClaimsPerUser === '' ? 1 : Number(b.maxClaimsPerUser) };
+    if (task.title.length < 2 || task.title.length > 120 || task.description.length > 500 || task.rewardAmountMicros === null || task.rewardAmountMicros < 0 || !digiClaimTypes.has(task.claimType) || task.startsAt === null || (task.endsAt !== null && task.endsAt < task.startsAt) || !Number.isInteger(task.maxClaimsPerUser) || task.maxClaimsPerUser < 1) return send(res, 400, { error: 'Task fields are invalid' });
+    campaign.tasks = campaign.tasks || []; campaign.tasks.push(task); campaign.updatedAt = Date.now();
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'campaign.updated', entityType: 'task', entityId: task.id, details: { campaignId: campaign.id, title: task.title } });
+    await persist();
+    return send(res, 201, { task: { ...task, rewardAmount: formatUsdtMicros(task.rewardAmountMicros) } });
+  }
+
+  if (req.method === 'PATCH' && /^\/admin\/campaigns\/[A-Za-z0-9_-]+\/tasks\/[A-Za-z0-9_-]+$/.test(path)) {
+    const admin = adminAuth(req); requireAdminRole(admin, ['owner', 'ops']);
+    const parts = path.split('/'); const campaign = db.digirupee.campaigns.find(item => item.id === parts[3]); const task = campaign?.tasks?.find(item => item.id === parts[5]);
+    if (!task) return send(res, 404, { error: 'Task not found' });
+    const b = await body(req);
+    if (b.title !== undefined) task.title = String(b.title || '').trim();
+    if (b.description !== undefined) task.description = String(b.description || '').trim();
+    if (b.rewardAmount !== undefined || b.rewardAmountUsdt !== undefined) task.rewardAmountMicros = parseUsdtMicros(b.rewardAmount ?? b.rewardAmountUsdt);
+    if (typeof b.enabled === 'boolean') task.enabled = b.enabled;
+    if (b.claimType !== undefined) task.claimType = String(b.claimType || '').trim().toUpperCase();
+    if (b.requirements !== undefined) task.requirements = b.requirements && typeof b.requirements === 'object' ? b.requirements : {};
+    if (task.title.length < 2 || task.title.length > 120 || task.description.length > 500 || !Number.isSafeInteger(task.rewardAmountMicros) || task.rewardAmountMicros < 0 || !digiClaimTypes.has(task.claimType)) return send(res, 400, { error: 'Task fields are invalid' });
+    campaign.updatedAt = Date.now(); appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'campaign.updated', entityType: 'task', entityId: task.id, details: { campaignId: campaign.id } }); await persist();
+    return send(res, 200, { task: { ...task, rewardAmount: formatUsdtMicros(task.rewardAmountMicros) } });
+  }
+
+  if (req.method === 'PATCH' && /^\/admin\/campaigns\/[A-Za-z0-9_-]+\/tasks\/[A-Za-z0-9_-]+\/status$/.test(path)) {
+    const admin = adminAuth(req); requireAdminRole(admin, ['owner', 'ops']);
+    const parts = path.split('/'); const campaign = db.digirupee.campaigns.find(item => item.id === parts[3]); const task = campaign?.tasks?.find(item => item.id === parts[5]);
+    if (!task) return send(res, 404, { error: 'Task not found' }); const b = await body(req); if (typeof b.enabled !== 'boolean') return send(res, 400, { error: 'enabled must be boolean' });
+    task.enabled = b.enabled; campaign.updatedAt = Date.now(); appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: b.enabled ? 'campaign.updated' : 'campaign.disabled', entityType: 'task', entityId: task.id, details: { campaignId: campaign.id } }); await persist(); return send(res, 200, { task: { ...task, rewardAmount: formatUsdtMicros(task.rewardAmountMicros) } });
+  }
+
+  if (req.method === 'DELETE' && /^\/admin\/campaigns\/[A-Za-z0-9_-]+\/tasks\/[A-Za-z0-9_-]+$/.test(path)) {
+    const admin = adminAuth(req); requireAdminRole(admin, ['owner']); const parts = path.split('/'); const campaign = db.digirupee.campaigns.find(item => item.id === parts[3]); const task = campaign?.tasks?.find(item => item.id === parts[5]);
+    if (!task) return send(res, 404, { error: 'Task not found' }); if (db.digirupee.taskClaims.some(claim => claim.taskId === task.id)) return send(res, 409, { error: 'Task has historical claims; disable it instead' }); campaign.tasks = campaign.tasks.filter(item => item.id !== task.id); campaign.updatedAt = Date.now(); appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'campaign.disabled', entityType: 'task', entityId: task.id, details: { deleted: true } }); await persist(); return send(res, 200, { ok: true });
+  }
+
+  if (req.method === 'GET' && path === '/admin/task-claims') {
+    const admin = adminAuth(req); const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`); const status = url.searchParams.get('status');
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, claims: db.digirupee.taskClaims.filter(claim => !status || claim.status === status).sort((a, b) => Number(b.submittedAt) - Number(a.submittedAt)).slice(0, 500).map(claim => { const user = db.digirupee.users.find(item => item.id === claim.userId); const campaign = db.digirupee.campaigns.find(item => item.id === claim.campaignId); const task = campaign?.tasks?.find(item => item.id === claim.taskId); return { ...claim, user: user ? { id: user.id, name: user.profile?.fullName || '', email: user.email } : { id: claim.userId }, campaign: campaign ? campaign.title : '', task: task ? task.title : '' }; }) });
+  }
+
+  if (req.method === 'POST' && /^\/admin\/task-claims\/[A-Za-z0-9_-]+\/decision$/.test(path)) {
+    const admin = adminAuth(req); requireAdminRole(admin, ['owner', 'ops']);
+    const claim = db.digirupee.taskClaims.find(item => item.id === path.split('/').at(-2)); if (!claim) return send(res, 404, { error: 'Task claim not found' });
+    if (claim.status !== 'pending_review') return send(res, 409, { error: 'This task claim has already been decided' });
+    const b = await body(req); const decision = String(b.decision || '').trim().toUpperCase(); const note = String(b.note || '').trim().slice(0, 500);
+    if (!['APPROVE', 'REJECT'].includes(decision)) return send(res, 400, { error: 'decision must be APPROVE or REJECT' });
+    if (decision === 'REJECT' && note.length < 3) return send(res, 400, { error: 'A rejection reason is required' });
+    claim.status = decision === 'APPROVE' ? 'approved' : 'rejected'; claim.reviewedBy = admin.email; claim.reviewedAt = Date.now(); claim.adminNote = note;
+    if (decision === 'APPROVE') {
+      const campaign = db.digirupee.campaigns.find(item => item.id === claim.campaignId); const task = campaign?.tasks?.find(item => item.id === claim.taskId);
+      if (!task) return send(res, 409, { error: 'The claimed task no longer exists' });
+      const reward = issueDigiReward({ userId: claim.userId, amountMicros: task.rewardAmountMicros, type: 'task', sourceType: 'task', sourceId: claim.id, description: task.title });
+      if (reward.error) return send(res, 400, { error: reward.error }); claim.rewardLedgerId = reward.entry.id; claim.status = 'credited';
+      appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'task.approved', entityType: 'task-claim', entityId: claim.id, details: { reward: formatUsdtMicros(task.rewardAmountMicros) } });
+    } else appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'task.rejected', entityType: 'task-claim', entityId: claim.id, details: { reason: note } });
+    await persist(); return send(res, 200, { claim });
+  }
+
+  if (req.method === 'GET' && path === '/admin/wheel') {
+    const admin = adminAuth(req); return send(res, 200, { admin: { email: admin.email, role: admin.role }, config: db.digirupee.wheelConfig });
+  }
+
+  if (req.method === 'PATCH' && path === '/admin/wheel') {
+    const admin = adminAuth(req); requireAdminRole(admin, ['owner']); const b = await body(req);
+    const segments = Array.isArray(b.segments) ? b.segments.map(item => ({ id: String(item.id || '').trim().slice(0, 40), label: String(item.label || '').trim().slice(0, 80), rewardAmountMicros: parseUsdtMicros(item.rewardAmount ?? item.rewardAmountUsdt ?? '0'), probabilityWeight: Number(item.probabilityWeight), enabled: item.enabled !== false })) : null;
+    const dailyClaimLimit = Number(b.dailyClaimLimit); const enabled = b.enabled === true;
+    if (!segments || segments.length < 1 || segments.length > 20 || segments.some(item => !/^[A-Za-z0-9_-]{1,40}$/.test(item.id) || !item.label || item.rewardAmountMicros === null || item.rewardAmountMicros < 0 || !Number.isSafeInteger(item.probabilityWeight) || item.probabilityWeight < 0) || new Set(segments.map(item => item.id)).size !== segments.length || !Number.isInteger(dailyClaimLimit) || dailyClaimLimit < 1 || dailyClaimLimit > 10 || (enabled && !segments.some(item => item.enabled && item.probabilityWeight > 0))) return send(res, 400, { error: 'Wheel configuration is invalid' });
+    db.digirupee.wheelConfig = { enabled, dailyClaimLimit, segments, updatedAt: Date.now() };
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'wheel.configured', entityType: 'wheel', entityId: 'config', details: { enabled, segmentCount: segments.length } }); await persist();
+    return send(res, 200, { config: db.digirupee.wheelConfig });
+  }
+
+  if (req.method === 'GET' && path === '/admin/wheel/history') {
+    const admin = adminAuth(req); const claims = db.digirupee.wheelClaims.slice().sort((a, b) => Number(b.createdAt) - Number(a.createdAt)).slice(0, 500).map(claim => { const user = db.digirupee.users.find(item => item.id === claim.userId); return { id: claim.id, user: user ? { id: user.id, name: user.profile?.fullName || '' } : { id: claim.userId }, label: claim.label, rewardAmount: formatUsdtMicros(claim.rewardAmountMicros), createdAt: claim.createdAt }; });
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, claims, spinsToday: db.digirupee.wheelClaims.filter(claim => claim.dayKey === indiaDayKey()).length, rewardsIssuedToday: formatUsdtMicros(db.digirupee.wheelClaims.filter(claim => claim.dayKey === indiaDayKey()).reduce((sum, claim) => sum + Number(claim.rewardAmountMicros || 0), 0)) });
+  }
+
+  if (req.method === 'GET' && path === '/admin/referrals') {
+    const admin = adminAuth(req); return send(res, 200, { admin: { email: admin.email, role: admin.role }, referrals: db.digirupee.referrals.map(referralPublic), metrics: { total: db.digirupee.referrals.length, qualified: db.digirupee.referrals.filter(item => ['qualified', 'rewarded'].includes(item.status)).length, pending: db.digirupee.referrals.filter(item => item.status === 'pending').length, rewards: formatUsdtMicros(db.digirupee.referrals.reduce((sum, item) => sum + Number(db.digirupee.rewardLedger.find(entry => entry.id === item.inviterRewardLedgerId)?.amountMicros || 0), 0)) } });
+  }
+
+  if (req.method === 'GET' && path === '/admin/referral-policy') {
+    const admin = adminAuth(req); return send(res, 200, { policy: referralPolicy() });
+  }
+
+  if (req.method === 'PATCH' && path === '/admin/referral-policy') {
+    const admin = adminAuth(req); requireAdminRole(admin, ['owner']); const b = await body(req); const inviterRewardUsdt = validDigiAmount(b.inviterRewardUsdt ?? 0, 0, 1_000_000); const referredRewardUsdt = validDigiAmount(b.referredRewardUsdt ?? 0, 0, 1_000_000); const minimumCompletedUsdt = validDigiAmount(b.minimumCompletedUsdt ?? 0, 0, 1_000_000);
+    if ([inviterRewardUsdt, referredRewardUsdt, minimumCompletedUsdt].some(value => value === null)) return send(res, 400, { error: 'Referral policy amounts are invalid' });
+    db.digirupee.config.referrals = { enabled: b.enabled !== false, inviterRewardUsdt, referredRewardUsdt, minimumCompletedUsdt }; db.digirupee.config.updatedAt = Date.now(); appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'referral.policy.updated', entityType: 'referral-policy', entityId: 'config', details: { enabled: db.digirupee.config.referrals.enabled, inviterRewardUsdt, referredRewardUsdt, minimumCompletedUsdt } }); await persist(); return send(res, 200, { policy: referralPolicy() });
   }
 
   if (req.method === 'GET' && path === '/payout-methods') {
@@ -2177,6 +2699,9 @@ async function digirupeeApi(req, res, path) {
     if (!validPassword(password)) return send(res, 400, { error: 'Password must be 8 to 128 characters' });
     if (db.digirupee.users.some(item => item.email === email)) return send(res, 409, { error: 'Email is already registered' });
     if (db.digirupee.users.some(item => item.mobile === mobile)) return send(res, 409, { error: 'Mobile number is already registered' });
+    const referralCode = String(b.referralCode || '').trim().toUpperCase();
+    const referrer = referralCode ? db.digirupee.users.find(item => String(item.referralCode || '').toUpperCase() === referralCode) : null;
+    if (referralCode && !referrer) return send(res, 400, { error: 'Referral code is invalid' });
 
     const now = Date.now();
     const user = {
@@ -2186,6 +2711,7 @@ async function digirupeeApi(req, res, path) {
       passwordHash: hashPassword(password),
       status: 'active',
       createdAt: now,
+      referralCode: `DGR${randomBytes(5).toString('hex').toUpperCase()}`,
       profile: {
         fullName,
         language: 'en',
@@ -2193,6 +2719,10 @@ async function digirupeeApi(req, res, path) {
       }
     };
     db.digirupee.users.push(user);
+    if (referrer && referrer.id !== user.id) {
+      db.digirupee.referrals.push({ id: `dref_${randomUUID().replace(/-/g, '').slice(0, 12)}`, referrerUserId: referrer.id, referredUserId: user.id, createdAt: now, status: 'pending', qualifiedAt: null, qualifyingOrderId: null, inviterRewardLedgerId: null, referredRewardLedgerId: null });
+      appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'referral.created', entityType: 'referral', entityId: db.digirupee.referrals.at(-1).id, details: { referrerUserId: referrer.id } });
+    }
     appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'user.registered', entityType: 'user', entityId: user.id, details: { email } });
     await persist();
     return send(res, 201, { ...digiUserResponse(user), loginRequired: true });
@@ -3111,7 +3641,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-if (ensureDigiAddressAssignments()) await persist();
+if (ensureDigiReferralCodes() || ensureDigiAddressAssignments()) await persist();
 
 server.listen(port, '0.0.0.0', () => {
   console.log(`LOKTRON website listening on ${port}`);
