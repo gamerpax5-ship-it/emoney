@@ -624,7 +624,7 @@ function isValidTronAddress(value) {
 }
 
 function publicDigiAddress(address) {
-  return { ...address };
+  return { ...address, safeReuseAt: address.reservedOrderId ? null : (address.reservedUntil || null) };
 }
 
 function releaseDigiAddress(order, timestamp = Date.now()) {
@@ -753,8 +753,8 @@ function publicDigiOrder(order, { admin = false } = {}) {
       : (order.payoutMethodSnapshots || [])).map(method => methodSummary(method))
   };
   if (admin) {
-    result.payoutMethods = (order.payoutMethodIds || []).map(id => db.digirupee.payoutMethods.find(method => method.id === id)).filter(Boolean).map(method => ({ ...method }));
-    if (!result.payoutMethods.length && Array.isArray(order.payoutMethodSnapshots)) result.payoutMethods = order.payoutMethodSnapshots.map(method => ({ ...method }));
+    result.payoutMethods = (order.payoutMethodIds || []).map(id => db.digirupee.payoutMethods.find(method => method.id === id)).filter(Boolean).map(adminDigiPayoutMethod);
+    if (!result.payoutMethods.length && Array.isArray(order.payoutMethodSnapshots)) result.payoutMethods = order.payoutMethodSnapshots.map(adminDigiPayoutMethod);
     result.chainError = order.chainError || null;
     result.user = publicDigiUser(db.digirupee.users.find(user => user.id === order.userId) || { id: order.userId, profile: {}, email: '', mobile: '', createdAt: null, status: 'unknown' });
   }
@@ -1214,12 +1214,14 @@ function markDigiProviderResult(order, chainStatus, chainError = null) {
   if (order.chainStatus !== chainStatus) { order.chainStatus = chainStatus; changed = true; }
   const safeError = chainError ? String(chainError).slice(0, 220) : null;
   if (order.chainError !== safeError) { order.chainError = safeError; changed = true; }
+  if (chainStatus === 'provider_error') digiMonitorState.lastProviderErrorAt = now;
   return changed;
 }
 
 async function pollDigiOrder(order) {
   try {
     const candidates = await loadDigiTransfers(order, order.txId || '');
+    digiMonitorState.lastSuccessfulProviderCheckAt = Date.now();
     let changed = false;
     let matched = false;
     for (const rawCandidate of candidates) {
@@ -1374,16 +1376,25 @@ function decideDigiReview(order, admin, raw) {
 
 let digiMonitorTimer = null;
 let digiMonitorRunning = false;
+const digiMonitorState = {
+  lastCycleAt: null,
+  lastSuccessfulProviderCheckAt: null,
+  lastProviderErrorAt: null,
+  lastError: null
+};
 async function runDigiMonitor() {
   if (digiMonitorRunning) return;
   digiMonitorRunning = true;
   try {
+    digiMonitorState.lastError = null;
     let changed = expireDigiOrders();
     for (const order of monitorableDigiOrders()) changed = await pollDigiOrder(order) || changed;
     if (changed) await persist();
   } catch (error) {
+    digiMonitorState.lastError = String(error.message || 'Monitor cycle failed').slice(0, 220);
     console.warn('digiRupee monitor cycle failed:', error.message);
   } finally {
+    digiMonitorState.lastCycleAt = Date.now();
     digiMonitorRunning = false;
     if (tronVerifyMode === 'required' || tronVerifyMode === 'mock') {
       digiMonitorTimer = setTimeout(() => {
@@ -1835,12 +1846,178 @@ function digiUserResponse(user) {
   return { user: publicDigiUser(user), profile: publicDigiProfile(user) };
 }
 
+function adminDigiPayoutMethod(method) {
+  if (!method) return null;
+  return {
+    id: method.id,
+    userId: method.userId,
+    type: method.type,
+    label: method.label,
+    ...(method.type === 'UPI'
+      ? { upiId: method.upiId, holderName: method.holderName, mobile: method.mobile }
+      : { bankName: method.bankName, accountNumber: maskDigiValue(method.accountNumber, 0, 4), ifsc: method.ifsc, holderName: method.holderName, mobile: method.mobile }),
+    minInr: method.minInr,
+    maxInr: method.maxInr,
+    dailyLimitInr: method.dailyLimitInr,
+    enabled: !!method.enabled,
+    createdAt: method.createdAt,
+    updatedAt: method.updatedAt
+  };
+}
+
+function digiUserActivityAt(userId) {
+  const sessionAt = db.digirupee.sessions.filter(session => session.uid === userId).reduce((latest, session) => Math.max(latest, Number(session.createdAt || 0)), 0);
+  const orderAt = db.digirupee.orders.filter(order => order.userId === userId).reduce((latest, order) => Math.max(latest, Number(order.updatedAt || order.createdAt || 0)), 0);
+  return Math.max(sessionAt, orderAt);
+}
+
+function digiUserAdminSummary(user) {
+  const orders = db.digirupee.orders.filter(order => order.userId === user.id);
+  const completed = orders.filter(order => order.status === 'Completed');
+  const paidInrPaise = completed.reduce((sum, order) => sum + Number(order.payout?.paidInrPaise || 0), 0);
+  const activeOrders = orders.filter(digiOrderIsActive);
+  return {
+    id: user.id,
+    name: user.profile?.fullName || '',
+    email: user.email,
+    mobile: user.mobile,
+    accountStatus: user.status,
+    joinedAt: user.createdAt,
+    lastActiveAt: digiUserActivityAt(user.id) || null,
+    completedOrders: completed.length,
+    activeOrders: activeOrders.length,
+    usdtVolume: formatUsdtMicros(orders.reduce((sum, order) => sum + Number(order.usdtMicros || 0), 0)),
+    inrSettled: formatInrPaise(paidInrPaise),
+    payoutMethodCount: db.digirupee.payoutMethods.filter(method => method.userId === user.id).length
+  };
+}
+
+function digiOverviewMetrics() {
+  const orders = db.digirupee.orders;
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const activeUsers = db.digirupee.users.filter(user => user.status === 'active' && digiUserActivityAt(user.id) >= thirtyDaysAgo).length;
+  const settledOrders = orders.filter(order => order.status === 'Completed');
+  const pendingPayouts = orders.filter(order => ['USDT Confirmed', 'INR Processing'].includes(order.status));
+  return {
+    totalUsers: db.digirupee.users.length,
+    activeUsers,
+    totalOrders: orders.length,
+    byStatus: Object.fromEntries([...new Set([...digiActiveStatuses, ...digiFinalStatuses])].map(status => [status, orders.filter(order => order.status === status).length])),
+    totalUsdtVolume: formatUsdtMicros(orders.reduce((sum, order) => sum + Number(order.usdtMicros || 0), 0)),
+    totalInrSettled: formatInrPaise(settledOrders.reduce((sum, order) => sum + Number(order.payout?.paidInrPaise || 0), 0)),
+    pendingPayouts: pendingPayouts.length,
+    pendingReviews: orders.filter(order => order.status === 'Late Review').length,
+    enabledTronAddresses: db.digirupee.tronAddresses.filter(address => address.enabled).length,
+    updatedAt: Date.now()
+  };
+}
+
+function digiAdminUserDetail(user) {
+  const summary = digiUserAdminSummary(user);
+  return {
+    ...summary,
+    profile: publicDigiProfile(user),
+    payoutMethods: db.digirupee.payoutMethods.filter(method => method.userId === user.id).map(adminDigiPayoutMethod),
+    recentOrders: db.digirupee.orders.filter(order => order.userId === user.id).sort((a, b) => Number(b.createdAt) - Number(a.createdAt)).slice(0, 20).map(order => publicDigiOrder(order, { admin: true }))
+  };
+}
+
+function digiAddressHistory(addressId) {
+  return db.digirupee.addressAssignments.filter(item => item.addressId === addressId).sort((a, b) => Number(b.assignedAt) - Number(a.assignedAt)).map(item => {
+    const user = db.digirupee.users.find(candidate => candidate.id === item.userId);
+    return {
+      orderId: item.orderId,
+      user: user ? { id: user.id, name: user.profile?.fullName || '', email: user.email } : { id: item.userId, name: '', email: '' },
+      assignedAt: item.assignedAt,
+      quoteExpiresAt: item.quoteExpiresAt,
+      releasedAt: item.releasedAt || null,
+      safeReuseAt: item.safeReuseAt || null,
+      txId: item.txId || null,
+      status: item.status
+    };
+  });
+}
+
 function validDigiAmount(value, minimum = 0.01, maximum = 1_000_000) {
   const amount = Number(value);
   return Number.isFinite(amount) && amount >= minimum && amount <= maximum ? Number(amount.toFixed(6)) : null;
 }
 
 async function digirupeeApi(req, res, path) {
+  if (req.method === 'GET' && path === '/admin/overview') {
+    const admin = adminAuth(req);
+    const expired = expireDigiOrders();
+    if (expired) await persist();
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, metrics: digiOverviewMetrics(), config: publicDigiConfig() });
+  }
+
+  if (req.method === 'GET' && path === '/admin/users') {
+    const admin = adminAuth(req);
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, users: db.digirupee.users.map(digiUserAdminSummary).sort((a, b) => Number(b.joinedAt) - Number(a.joinedAt)) });
+  }
+
+  if (req.method === 'GET' && /^\/admin\/users\/[A-Za-z0-9_-]+$/.test(path)) {
+    const admin = adminAuth(req);
+    const id = path.split('/').pop();
+    const user = db.digirupee.users.find(item => item.id === id);
+    if (!user) return send(res, 404, { error: 'User not found' });
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, user: digiAdminUserDetail(user) });
+  }
+
+  if (req.method === 'PATCH' && /^\/admin\/users\/[A-Za-z0-9_-]+\/status$/.test(path)) {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
+    const id = path.split('/').at(-2);
+    const user = db.digirupee.users.find(item => item.id === id);
+    if (!user) return send(res, 404, { error: 'User not found' });
+    const b = await body(req);
+    const status = String(b.status || '').trim().toLowerCase();
+    const reason = String(b.reason || '').trim();
+    if (!['active', 'suspended'].includes(status)) return send(res, 400, { error: 'User status must be active or suspended' });
+    if (reason.length < 3 || reason.length > 500) return send(res, 400, { error: 'A reason between 3 and 500 characters is required' });
+    if (user.status === status) return send(res, 200, { user: digiUserAdminSummary(user), idempotent: true });
+    user.status = status;
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: `user.${status}`, entityType: 'user', entityId: user.id, details: { status, reason } });
+    await persist();
+    return send(res, 200, { user: digiUserAdminSummary(user) });
+  }
+
+  if (req.method === 'GET' && /^\/admin\/tron-addresses\/[A-Za-z0-9_-]+\/history$/.test(path)) {
+    const admin = adminAuth(req);
+    const id = path.split('/').at(-2);
+    const address = db.digirupee.tronAddresses.find(item => item.id === id);
+    if (!address) return send(res, 404, { error: 'TRON address not found' });
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, addressId: id, history: digiAddressHistory(id) });
+  }
+
+  if (req.method === 'GET' && path === '/admin/system-status') {
+    const admin = adminAuth(req);
+    const activeMonitoredOrders = monitorableDigiOrders().length;
+    return send(res, 200, {
+      admin: { email: admin.email, role: admin.role },
+      backend: 'online',
+      tron: {
+        verifyMode: tronVerifyMode,
+        network: tronNetwork,
+        requiredConfirmations: tronRequiredConfirmations,
+        pollIntervalMs: tronPollIntervalMs,
+        lateDepositGraceMs: tronLateDepositGraceMs,
+        addressReuseCooldownMs: tronAddressReuseCooldownMs,
+        apiKeyConfigured: !!tronApiKey
+      },
+      monitor: {
+        status: digiMonitorTimer || digiMonitorRunning ? 'running' : 'stopped',
+        lastCycleAt: digiMonitorState.lastCycleAt,
+        lastSuccessfulProviderCheckAt: digiMonitorState.lastSuccessfulProviderCheckAt,
+        lastProviderErrorAt: digiMonitorState.lastProviderErrorAt,
+        lastError: digiMonitorState.lastError,
+        activeMonitoredOrders
+      },
+      pendingPayouts: db.digirupee.orders.filter(order => ['USDT Confirmed', 'INR Processing'].includes(order.status)).length,
+      pendingReviews: db.digirupee.orders.filter(order => order.status === 'Late Review').length
+    });
+  }
+
   if (req.method === 'GET' && path === '/payout-methods') {
     const { user } = digirupeeAuth(req);
     return send(res, 200, { payoutMethods: db.digirupee.payoutMethods.filter(method => method.userId === user.id).sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt)).map(publicDigiPayoutMethod) });
