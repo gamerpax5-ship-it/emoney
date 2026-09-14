@@ -124,7 +124,21 @@ const defaultData = {
     title: 'Welcome to LOKTRON',
     text: 'Save your USDT wallet address before creating your first Buy order.',
     time: 'Today'
-  }]
+  }],
+  // digiRupee/WTRON has its own state namespace. It intentionally starts
+  // without demo users, payout methods, orders, rewards, or notifications.
+  digirupee: {
+    config: {
+      rates: { upi: 111.24, bank: 108 },
+      limits: { upiMinUsdt: 1000, bankMinUsdt: 5000, globalMaxUsdt: 50000 },
+      quoteValiditySeconds: 600,
+      channels: { upi: true, bank: true },
+      updatedAt: Date.now()
+    },
+    users: [],
+    auditLog: [],
+    sessions: []
+  }
 };
 
 let db = await loadDb();
@@ -155,7 +169,30 @@ async function loadDb() {
       bankLedger: Array.isArray(parsed.bankLedger) ? parsed.bankLedger : [],
       tickets: Array.isArray(parsed.tickets) ? parsed.tickets : [],
       notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
-      auditLog: Array.isArray(parsed.auditLog) ? parsed.auditLog : []
+      auditLog: Array.isArray(parsed.auditLog) ? parsed.auditLog : [],
+      digirupee: {
+        ...structuredClone(defaultData.digirupee),
+        ...(parsed.digirupee || {}),
+        config: {
+          ...structuredClone(defaultData.digirupee.config),
+          ...((parsed.digirupee || {}).config || {}),
+          rates: {
+            ...structuredClone(defaultData.digirupee.config.rates),
+            ...(((parsed.digirupee || {}).config || {}).rates || {})
+          },
+          limits: {
+            ...structuredClone(defaultData.digirupee.config.limits),
+            ...(((parsed.digirupee || {}).config || {}).limits || {})
+          },
+          channels: {
+            ...structuredClone(defaultData.digirupee.config.channels),
+            ...(((parsed.digirupee || {}).config || {}).channels || {})
+          }
+        },
+        users: Array.isArray((parsed.digirupee || {}).users) ? (parsed.digirupee || {}).users : [],
+        auditLog: Array.isArray((parsed.digirupee || {}).auditLog) ? (parsed.digirupee || {}).auditLog : [],
+        sessions: Array.isArray((parsed.digirupee || {}).sessions) ? (parsed.digirupee || {}).sessions : []
+      }
     };
   } catch {
     return structuredClone(defaultData);
@@ -291,6 +328,117 @@ function clearSessionCookie(req) {
   return sessionCookie(req, '', 0);
 }
 
+const digiSessionCookieName = 'digirupee_session';
+function digiSessionToken(req) {
+  return readCookies(req)[digiSessionCookieName] || bearer(req);
+}
+
+function digiSessionHash(token) {
+  return createHash('sha256').update(String(token || '')).digest('hex');
+}
+
+function makeDigiSession(uid) {
+  const payload = Buffer.from(JSON.stringify({
+    scope: 'digirupee',
+    uid,
+    exp: Date.now() + sessionMaxAge * 1000
+  })).toString('base64url');
+  const sig = createHmac('sha256', sessionSecret).update(`digirupee:${payload}`).digest('base64url');
+  return `${payload}.${sig}`;
+}
+
+function verifyDigiSession(token) {
+  try {
+    const [payload, sig] = String(token || '').split('.');
+    if (!payload || !sig) return '';
+    const expected = createHmac('sha256', sessionSecret).update(`digirupee:${payload}`).digest();
+    const actual = Buffer.from(sig, 'base64url');
+    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return '';
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (data.scope !== 'digirupee' || !data.uid || Number(data.exp) < Date.now()) return '';
+    const tokenHash = digiSessionHash(token);
+    const session = db.digirupee.sessions.find(item => item.tokenHash === tokenHash);
+    if (!session || session.revokedAt || Number(session.expiresAt) < Date.now()) return '';
+    return String(data.uid);
+  } catch {
+    return '';
+  }
+}
+
+function digiSessionCookie(req, token, maxAge = sessionMaxAge) {
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  const secure = forwardedProto === 'https' ? '; Secure' : '';
+  return `${digiSessionCookieName}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
+}
+
+function clearDigiSessionCookie(req) {
+  return digiSessionCookie(req, '', 0);
+}
+
+function registerDigiSession(uid, token) {
+  const now = Date.now();
+  db.digirupee.sessions = db.digirupee.sessions.filter(item => Number(item.expiresAt) > now && !item.revokedAt);
+  db.digirupee.sessions.push({
+    tokenHash: digiSessionHash(token),
+    uid,
+    createdAt: now,
+    expiresAt: now + sessionMaxAge * 1000
+  });
+}
+
+function revokeDigiSession(token) {
+  const tokenHash = digiSessionHash(token);
+  const session = db.digirupee.sessions.find(item => item.tokenHash === tokenHash);
+  if (session) session.revokedAt = Date.now();
+  return session;
+}
+
+function normalizeDigiMobile(value) {
+  const raw = String(value || '').trim();
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.length >= 11 && digits.length <= 15) return `+${digits}`;
+  return '';
+}
+
+function publicDigiUser(user) {
+  return {
+    id: user.id,
+    email: user.email,
+    mobile: user.mobile,
+    fullName: user.profile.fullName,
+    joinedAt: user.createdAt,
+    accountStatus: user.status,
+    language: user.profile.language,
+    notificationPreference: user.profile.notificationPreference
+  };
+}
+
+function digirupeeAuth(req) {
+  const token = digiSessionToken(req);
+  const uid = verifyDigiSession(token);
+  if (!uid) throw Object.assign(new Error('Please login again'), { status: 401 });
+  const user = db.digirupee.users.find(item => item.id === uid);
+  if (!user) throw Object.assign(new Error('User not found'), { status: 401 });
+  if (user.status !== 'active') throw Object.assign(new Error('Account is not active'), { status: 403 });
+  return { token, user };
+}
+
+function publicDigiConfig() {
+  const config = db.digirupee.config;
+  return {
+    rates: { upi: Number(config.rates.upi), bank: Number(config.rates.bank) },
+    limits: {
+      upiMinUsdt: Number(config.limits.upiMinUsdt),
+      bankMinUsdt: Number(config.limits.bankMinUsdt),
+      globalMaxUsdt: Number(config.limits.globalMaxUsdt)
+    },
+    quoteValiditySeconds: Number(config.quoteValiditySeconds),
+    channels: { upi: !!config.channels.upi, bank: !!config.channels.bank },
+    updatedAt: config.updatedAt
+  };
+}
+
 function auth(req) {
   const token = sessionToken(req);
   const uid = verifySession(token);
@@ -380,6 +528,24 @@ function appendAudit({ actorType, actorId, action, entityType, entityId, details
   };
   entry.hash = createHash('sha256').update(previous + '|' + JSON.stringify(entry)).digest('hex');
   db.auditLog.push(entry);
+  return entry;
+}
+
+function appendDigiAudit({ actorType, actorId, action, entityType, entityId, details = {} }) {
+  const previous = db.digirupee.auditLog.at(-1)?.hash || 'GENESIS';
+  const entry = {
+    id: 'dga_' + randomUUID(),
+    at: Date.now(),
+    actorType,
+    actorId,
+    action,
+    entityType,
+    entityId,
+    details: canonical(details),
+    previous
+  };
+  entry.hash = createHash('sha256').update(previous + '|' + JSON.stringify(entry)).digest('hex');
+  db.digirupee.auditLog.push(entry);
   return entry;
 }
 
@@ -688,7 +854,191 @@ function headers(type) {
   };
 }
 
+function publicDigiProfile(user) {
+  return {
+    fullName: user.profile.fullName,
+    email: user.email,
+    mobile: user.mobile,
+    userId: user.id,
+    joinedAt: user.createdAt,
+    accountStatus: user.status,
+    language: user.profile.language,
+    notificationPreference: user.profile.notificationPreference
+  };
+}
+
+function digiUserResponse(user) {
+  return { user: publicDigiUser(user), profile: publicDigiProfile(user) };
+}
+
+function validDigiAmount(value, minimum = 0.01, maximum = 1_000_000) {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= minimum && amount <= maximum ? Number(amount.toFixed(6)) : null;
+}
+
+async function digirupeeApi(req, res, path) {
+  if (req.method === 'GET' && path === '/rates') {
+    return send(res, 200, publicDigiConfig());
+  }
+
+  if (req.method === 'POST' && path === '/auth/register') {
+    limitRequest(req, 'digirupee-register', 5, 60 * 60 * 1000);
+    const b = await body(req);
+    const email = String(b.email || '').trim().toLowerCase();
+    const password = String(b.password || '');
+    const fullName = String(b.fullName || b.name || '').trim();
+    const mobile = normalizeDigiMobile(b.mobile);
+    if (!safeEmail(email)) return send(res, 400, { error: 'Enter a valid email address' });
+    if (fullName.length < 2 || fullName.length > 80) return send(res, 400, { error: 'Enter your full name' });
+    if (!mobile) return send(res, 400, { error: 'Enter a valid mobile number' });
+    if (!validPassword(password)) return send(res, 400, { error: 'Password must be 8 to 128 characters' });
+    if (db.digirupee.users.some(item => item.email === email)) return send(res, 409, { error: 'Email is already registered' });
+    if (db.digirupee.users.some(item => item.mobile === mobile)) return send(res, 409, { error: 'Mobile number is already registered' });
+
+    const now = Date.now();
+    const user = {
+      id: 'dgu_' + randomUUID().replace(/-/g, '').slice(0, 12),
+      email,
+      mobile,
+      passwordHash: hashPassword(password),
+      status: 'active',
+      createdAt: now,
+      profile: {
+        fullName,
+        language: 'en',
+        notificationPreference: true
+      }
+    };
+    db.digirupee.users.push(user);
+    appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'user.registered', entityType: 'user', entityId: user.id, details: { email } });
+    await persist();
+    return send(res, 201, { ...digiUserResponse(user), loginRequired: true });
+  }
+
+  if (req.method === 'POST' && path === '/auth/login') {
+    limitRequest(req, 'digirupee-login', 12, 15 * 60 * 1000);
+    const b = await body(req);
+    const email = String(b.email || '').trim().toLowerCase();
+    const password = String(b.password || '');
+    const user = db.digirupee.users.find(item => item.email === email);
+    if (!safeEmail(email) || !password || !user || !verifyPassword(password, user.passwordHash)) {
+      return send(res, 401, { error: 'Invalid email or password' });
+    }
+    if (user.status !== 'active') return send(res, 403, { error: 'Account is not active' });
+    if (!String(user.passwordHash || '').startsWith('scrypt$')) user.passwordHash = hashPassword(password);
+    const token = makeDigiSession(user.id);
+    registerDigiSession(user.id, token);
+    appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'user.login', entityType: 'session', entityId: user.id });
+    await persist();
+    return send(res, 200, { ...digiUserResponse(user), token, expiresIn: sessionMaxAge }, { 'Set-Cookie': digiSessionCookie(req, token) });
+  }
+
+  if (req.method === 'POST' && path === '/auth/logout') {
+    const token = digiSessionToken(req);
+    const uid = verifyDigiSession(token);
+    const session = revokeDigiSession(token);
+    if (uid && session) {
+      appendDigiAudit({ actorType: 'user', actorId: uid, action: 'user.logout', entityType: 'session', entityId: uid });
+      await persist();
+    }
+    return send(res, 200, { ok: true }, { 'Set-Cookie': clearDigiSessionCookie(req) });
+  }
+
+  if (req.method === 'GET' && (path === '/me' || path === '/profile')) {
+    const { user } = digirupeeAuth(req);
+    return send(res, 200, digiUserResponse(user));
+  }
+
+  if (req.method === 'PATCH' && path === '/profile') {
+    const { user } = digirupeeAuth(req);
+    const b = await body(req);
+    const changes = {};
+    if (b.fullName !== undefined || b.name !== undefined) {
+      const fullName = String(b.fullName ?? b.name).trim();
+      if (fullName.length < 2 || fullName.length > 80) return send(res, 400, { error: 'Enter your full name' });
+      user.profile.fullName = fullName;
+      changes.fullName = fullName;
+    }
+    if (b.mobile !== undefined) {
+      const mobile = normalizeDigiMobile(b.mobile);
+      if (!mobile) return send(res, 400, { error: 'Enter a valid mobile number' });
+      if (db.digirupee.users.some(item => item.id !== user.id && item.mobile === mobile)) return send(res, 409, { error: 'Mobile number is already registered' });
+      user.mobile = mobile;
+      changes.mobile = mobile;
+    }
+    if (b.language !== undefined) {
+      const language = String(b.language).trim().toLowerCase();
+      if (!['en', 'hi'].includes(language)) return send(res, 400, { error: 'Unsupported language' });
+      user.profile.language = language;
+      changes.language = language;
+    }
+    if (b.notificationPreference !== undefined || b.notifications !== undefined) {
+      const preference = b.notificationPreference ?? b.notifications;
+      if (typeof preference !== 'boolean') return send(res, 400, { error: 'Notification preference must be boolean' });
+      user.profile.notificationPreference = preference;
+      changes.notificationPreference = preference;
+    }
+    if (!Object.keys(changes).length) return send(res, 400, { error: 'No profile changes supplied' });
+    appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'profile.updated', entityType: 'profile', entityId: user.id, details: changes });
+    await persist();
+    return send(res, 200, digiUserResponse(user));
+  }
+
+  if (req.method === 'GET' && path === '/admin/rates') {
+    const admin = adminAuth(req);
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, config: publicDigiConfig() });
+  }
+
+  if (req.method === 'PATCH' && path === '/admin/rates') {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner']);
+    const b = await body(req);
+    const current = db.digirupee.config;
+    const rates = b.rates || {};
+    const limits = b.limits || {};
+    const channels = b.channels || {};
+    const upi = validDigiAmount(rates.upi === undefined ? current.rates.upi : rates.upi, 0.01, 1_000_000);
+    const bank = validDigiAmount(rates.bank === undefined ? current.rates.bank : rates.bank, 0.01, 1_000_000);
+    const upiMinUsdt = validDigiAmount(limits.upiMinUsdt === undefined ? current.limits.upiMinUsdt : limits.upiMinUsdt, 0.000001, 1_000_000);
+    const bankMinUsdt = validDigiAmount(limits.bankMinUsdt === undefined ? current.limits.bankMinUsdt : limits.bankMinUsdt, 0.000001, 1_000_000);
+    const globalMaxUsdt = validDigiAmount(limits.globalMaxUsdt === undefined ? current.limits.globalMaxUsdt : limits.globalMaxUsdt, 0.000001, 1_000_000);
+    const quoteValiditySeconds = Number(b.quoteValiditySeconds === undefined ? current.quoteValiditySeconds : b.quoteValiditySeconds);
+    const nextChannels = {
+      upi: channels.upi === undefined ? !!current.channels.upi : channels.upi === true,
+      bank: channels.bank === undefined ? !!current.channels.bank : channels.bank === true
+    };
+    if ([upi, bank, upiMinUsdt, bankMinUsdt, globalMaxUsdt].some(value => value === null)) return send(res, 400, { error: 'Rates and limits must be positive numbers' });
+    if (upiMinUsdt > globalMaxUsdt || bankMinUsdt > globalMaxUsdt) return send(res, 400, { error: 'Channel minimum cannot exceed the global maximum' });
+    if (!Number.isInteger(quoteValiditySeconds) || quoteValiditySeconds < 60 || quoteValiditySeconds > 86_400) return send(res, 400, { error: 'Quote validity must be between 60 and 86400 seconds' });
+    if (!nextChannels.upi && !nextChannels.bank) return send(res, 400, { error: 'At least one selling channel must be enabled' });
+
+    current.rates = { upi, bank };
+    current.limits = { upiMinUsdt, bankMinUsdt, globalMaxUsdt };
+    current.quoteValiditySeconds = quoteValiditySeconds;
+    current.channels = nextChannels;
+    current.updatedAt = Date.now();
+    appendDigiAudit({
+      actorType: 'admin', actorId: admin.email, action: 'rates.updated', entityType: 'digirupee-config', entityId: 'rates',
+      details: { rates: current.rates, limits: current.limits, quoteValiditySeconds, channels: current.channels }
+    });
+    await persist();
+    return send(res, 200, { config: publicDigiConfig() });
+  }
+
+  if (req.method === 'GET' && path === '/admin/audit-log') {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops', 'support']);
+    return send(res, 200, { auditLog: db.digirupee.auditLog.slice(-250).reverse() });
+  }
+
+  return send(res, 404, { error: 'digiRupee API route not found' });
+}
+
 async function api(req, res, path) {
+  if (path === '/digirupee' || path.startsWith('/digirupee/')) {
+    return digirupeeApi(req, res, path.slice('/digirupee'.length) || '/');
+  }
+
   if (req.method === 'GET' && path === '/config') {
     return send(res, 200, db.config);
   }
