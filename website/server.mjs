@@ -8,6 +8,8 @@ import {
   randomInt,
   createHash,
   createHmac,
+  createCipheriv,
+  createDecipheriv,
   scryptSync,
   timingSafeEqual
 } from 'node:crypto';
@@ -29,6 +31,7 @@ const tronApiUrl = String(process.env.TRON_API_URL || 'https://api.trongrid.io')
 const tronApiKey = String(process.env.TRONGRID_API_KEY || '');
 const tronUsdtContract = String(process.env.TRON_USDT_CONTRACT || 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj');
 const tronVerifyMode = String(process.env.TRON_VERIFY_MODE || (production ? 'required' : 'manual')).toLowerCase();
+const digiTwoFactorEncryptionKey = String(process.env.DIGIRUPEE_2FA_ENCRYPTION_KEY || '');
 const tronNetwork = String(process.env.TRON_NETWORK || 'mainnet').trim().toLowerCase();
 const envNumber = (name, fallback) => Number.isFinite(Number(process.env[name])) ? Number(process.env[name]) : fallback;
 const tronRequiredConfirmations = Math.max(1, Math.min(10_000, envNumber('TRON_REQUIRED_CONFIRMATIONS', 19)));
@@ -164,6 +167,9 @@ const defaultData = {
     wheelConfig: { enabled: false, dailyClaimLimit: 1, segments: [], updatedAt: Date.now() },
     wheelClaims: [],
     referrals: [],
+    supportTickets: [],
+    notifications: [],
+    authChallenges: [],
     auditLog: [],
     sessions: []
   }
@@ -238,6 +244,9 @@ async function loadDb() {
         },
         wheelClaims: Array.isArray((parsed.digirupee || {}).wheelClaims) ? (parsed.digirupee || {}).wheelClaims : [],
         referrals: Array.isArray((parsed.digirupee || {}).referrals) ? (parsed.digirupee || {}).referrals : [],
+        supportTickets: Array.isArray((parsed.digirupee || {}).supportTickets) ? (parsed.digirupee || {}).supportTickets : [],
+        notifications: Array.isArray((parsed.digirupee || {}).notifications) ? (parsed.digirupee || {}).notifications : [],
+        authChallenges: Array.isArray((parsed.digirupee || {}).authChallenges) ? (parsed.digirupee || {}).authChallenges : [],
         auditLog: Array.isArray((parsed.digirupee || {}).auditLog) ? (parsed.digirupee || {}).auditLog : [],
         sessions: Array.isArray((parsed.digirupee || {}).sessions) ? (parsed.digirupee || {}).sessions : []
       }
@@ -423,15 +432,54 @@ function clearDigiSessionCookie(req) {
   return digiSessionCookie(req, '', 0);
 }
 
-function registerDigiSession(uid, token) {
+function digiSessionIpHash(req) {
+  const raw = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+  return createHash('sha256').update(`${sessionSecret}|${raw}`).digest('hex').slice(0, 24);
+}
+
+function digiDeviceLabel(userAgent) {
+  const ua = String(userAgent || '');
+  if (/android/i.test(ua) && /wv|webview/i.test(ua)) return 'Android WebView';
+  if (/android/i.test(ua)) return 'Android';
+  if (/iphone|ipad/i.test(ua)) return /safari/i.test(ua) ? 'Safari · iPhone' : 'iPhone/iPad';
+  if (/edg/i.test(ua)) return 'Edge · Windows';
+  if (/chrome/i.test(ua)) return 'Chrome · Windows';
+  if (/firefox/i.test(ua)) return 'Firefox · Desktop';
+  if (/safari/i.test(ua)) return 'Safari · Desktop';
+  return 'Unknown device';
+}
+
+function registerDigiSession(uid, token, req = null) {
   const now = Date.now();
   db.digirupee.sessions = db.digirupee.sessions.filter(item => Number(item.expiresAt) > now && !item.revokedAt);
-  db.digirupee.sessions.push({
+  const session = {
+    id: `dgs_${randomUUID().replace(/-/g, '').slice(0, 12)}`,
     tokenHash: digiSessionHash(token),
     uid,
+    userId: uid,
     createdAt: now,
-    expiresAt: now + sessionMaxAge * 1000
-  });
+    expiresAt: now + sessionMaxAge * 1000,
+    revokedAt: null,
+    lastSeenAt: now,
+    ipHash: req ? digiSessionIpHash(req) : null,
+    userAgent: req ? String(req.headers['user-agent'] || '').slice(0, 300) : '',
+    deviceLabel: req ? digiDeviceLabel(req.headers['user-agent']) : 'Unknown device'
+  };
+  db.digirupee.sessions.push(session);
+  return session;
+}
+
+function ensureDigiSessionFields() {
+  let changed = false;
+  for (const session of db.digirupee.sessions) {
+    if (!session.id) { session.id = `dgs_${randomUUID().replace(/-/g, '').slice(0, 12)}`; changed = true; }
+    if (!session.userId && session.uid) { session.userId = session.uid; changed = true; }
+    if (!session.createdAt) { session.createdAt = Date.now(); changed = true; }
+    if (!session.lastSeenAt) { session.lastSeenAt = session.createdAt; changed = true; }
+    if (!session.revokedAt) session.revokedAt = null;
+    if (!session.deviceLabel) { session.deviceLabel = digiDeviceLabel(session.userAgent); changed = true; }
+  }
+  return changed;
 }
 
 function revokeDigiSession(token) {
@@ -441,6 +489,18 @@ function revokeDigiSession(token) {
   return session;
 }
 
+function digiSessionRecord(token) {
+  return db.digirupee.sessions.find(item => item.tokenHash === digiSessionHash(token) && !item.revokedAt && Number(item.expiresAt) > Date.now()) || null;
+}
+
+function revokeOtherDigiSessions(userId, currentSessionId = null) {
+  const now = Date.now(); let count = 0;
+  for (const session of db.digirupee.sessions) {
+    if ((session.userId || session.uid) === userId && session.id !== currentSessionId && !session.revokedAt && Number(session.expiresAt) > now) { session.revokedAt = now; count += 1; }
+  }
+  return count;
+}
+
 function normalizeDigiMobile(value) {
   const raw = String(value || '').trim();
   const digits = raw.replace(/\D/g, '');
@@ -448,6 +508,104 @@ function normalizeDigiMobile(value) {
   if (digits.length >= 11 && digits.length <= 15) return `+${digits}`;
   return '';
 }
+
+const digiTicketCategories = new Set(['ORDER', 'DEPOSIT', 'PAYOUT', 'ACCOUNT', 'OTHER']);
+const digiTicketStatuses = new Set(['Open', 'In Progress', 'Resolved', 'Closed']);
+const digiCriticalNotificationTypes = new Set(['order', 'deposit', 'payout', 'support', 'security']);
+
+function createDigiNotification({ userId, type, title, message, entityType = null, entityId = null, sourceKey = null }) {
+  const user = db.digirupee.users.find(item => item.id === userId);
+  if (!user) return null;
+  if (sourceKey && db.digirupee.notifications.some(item => item.sourceKey === sourceKey)) return db.digirupee.notifications.find(item => item.sourceKey === sourceKey);
+  if (!digiCriticalNotificationTypes.has(type) && user.profile?.notificationPreference === false) return null;
+  const notification = { id: `dn_${randomUUID().replace(/-/g, '').slice(0, 12)}`, userId, type: String(type).slice(0, 30), title: String(title || '').trim().slice(0, 120), message: String(message || '').trim().slice(0, 500), entityType: entityType ? String(entityType).slice(0, 60) : null, entityId: entityId ? String(entityId).slice(0, 100) : null, readAt: null, createdAt: Date.now(), sourceKey };
+  db.digirupee.notifications.push(notification);
+  return notification;
+}
+
+function publicDigiNotification(notification) {
+  return { id: notification.id, type: notification.type, title: notification.title, message: notification.message, entityType: notification.entityType, entityId: notification.entityId, readAt: notification.readAt || null, createdAt: notification.createdAt };
+}
+
+function publicDigiTicket(ticket, admin = false) {
+  const user = db.digirupee.users.find(item => item.id === ticket.userId);
+  return { id: ticket.id, userId: ticket.userId, user: admin && user ? { id: user.id, name: user.profile?.fullName || '', email: user.email } : undefined, category: ticket.category, subject: ticket.subject, message: ticket.message, orderId: ticket.orderId || null, priority: ticket.priority, status: ticket.status, createdAt: ticket.createdAt, updatedAt: ticket.updatedAt, closedAt: ticket.closedAt || null, messages: (ticket.messages || []).map(item => ({ id: item.id, senderType: item.senderType, senderId: item.senderType === 'admin' ? 'admin' : item.senderId, text: item.text, createdAt: item.createdAt })) };
+}
+
+function ensureDigiSecurityFields() {
+  let changed = false;
+  for (const user of db.digirupee.users) {
+    if (!user.security || typeof user.security !== 'object') { user.security = { twoFactor: { enabled: false, secretCiphertext: null, pendingSecretCiphertext: null, backupCodeHashes: [], enabledAt: null }, lastLoginAt: null }; changed = true; }
+    if (!user.security.twoFactor || typeof user.security.twoFactor !== 'object') { user.security.twoFactor = { enabled: false, secretCiphertext: null, pendingSecretCiphertext: null, backupCodeHashes: [], enabledAt: null }; changed = true; }
+    const twoFactor = user.security.twoFactor;
+    for (const key of ['enabled', 'secretCiphertext', 'pendingSecretCiphertext', 'backupCodeHashes', 'enabledAt']) if (twoFactor[key] === undefined) { twoFactor[key] = key === 'enabled' ? false : key === 'backupCodeHashes' ? [] : null; changed = true; }
+    if (!Array.isArray(twoFactor.backupCodeHashes)) { twoFactor.backupCodeHashes = []; changed = true; }
+    if (user.security.lastLoginAt === undefined) { user.security.lastLoginAt = null; changed = true; }
+  }
+  return changed;
+}
+
+function digiTwoFactorKey() {
+  if (!digiTwoFactorEncryptionKey) throw Object.assign(new Error('digiRupee 2FA encryption is not configured'), { status: 503 });
+  return createHash('sha256').update(digiTwoFactorEncryptionKey).digest();
+}
+
+function encryptDigiSecret(secret) {
+  const iv = randomBytes(12); const cipher = createCipheriv('aes-256-gcm', digiTwoFactorKey(), iv); const data = Buffer.concat([cipher.update(String(secret), 'utf8'), cipher.final()]);
+  return `v1.${iv.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${data.toString('base64url')}`;
+}
+
+function decryptDigiSecret(value) {
+  try { const [version, iv, tag, data] = String(value || '').split('.'); if (version !== 'v1' || !iv || !tag || !data) return ''; const decipher = createDecipheriv('aes-256-gcm', digiTwoFactorKey(), Buffer.from(iv, 'base64url')); decipher.setAuthTag(Buffer.from(tag, 'base64url')); return Buffer.concat([decipher.update(Buffer.from(data, 'base64url')), decipher.final()]).toString('utf8'); } catch { return ''; }
+}
+
+function base32Decode(value) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits = ''; const clean = String(value || '').replace(/=+$/g, '').toUpperCase();
+  for (const char of clean) { const index = alphabet.indexOf(char); if (index < 0) return null; bits += index.toString(2).padStart(5, '0'); }
+  const bytes = []; for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2)); return Buffer.from(bytes);
+}
+
+function base32Encode(buffer) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits = ''; for (const byte of buffer) bits += byte.toString(2).padStart(8, '0'); let output = ''; for (let i = 0; i < bits.length; i += 5) output += alphabet[parseInt(bits.slice(i, i + 5).padEnd(5, '0'), 2)]; return output;
+}
+
+function totpCode(secret, timestamp = Date.now()) {
+  const key = base32Decode(secret); if (!key) return '';
+  const counter = Math.floor(timestamp / 30_000); const buffer = Buffer.alloc(8); buffer.writeBigUInt64BE(BigInt(counter)); const digest = createHmac('sha1', key).update(buffer).digest(); const offset = digest.at(-1) & 15; const value = (digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000; return String(value).padStart(6, '0');
+}
+
+function validTotp(secret, code) {
+  const normalized = String(code || '').trim(); if (!/^\d{6}$/.test(normalized)) return false; return [-1, 0, 1].some(offset => safeEqualText(totpCode(secret, Date.now() + offset * 30_000), normalized));
+}
+
+function hashRecoveryCode(code) { return hashPassword(String(code || '').toUpperCase()); }
+
+function verifyDigiSecondFactor(user, code, { consumeRecovery = true } = {}) {
+  const twoFactor = user.security?.twoFactor; const secret = decryptDigiSecret(twoFactor?.secretCiphertext); if (secret && validTotp(secret, code)) return { valid: true, kind: 'totp' };
+  const normalized = String(code || '').trim().toUpperCase();
+  const recovery = (twoFactor?.backupCodeHashes || []).find(item => !item.usedAt && verifyPassword(normalized, item.hash));
+  if (recovery) { if (consumeRecovery) recovery.usedAt = Date.now(); return { valid: true, kind: 'recovery' }; }
+  return { valid: false };
+}
+
+function digiSecuritySummary(user) {
+  const sessions = db.digirupee.sessions.filter(item => (item.userId || item.uid) === user.id && !item.revokedAt && Number(item.expiresAt) > Date.now());
+  return { twoFactorEnabled: !!user.security?.twoFactor?.enabled, activeSessionCount: sessions.length, lastLoginAt: user.security?.lastLoginAt || null };
+}
+
+function publicDigiSession(session, currentTokenHash) {
+  return { id: session.id || 'legacy-session', current: session.tokenHash === currentTokenHash, device: session.deviceLabel || digiDeviceLabel(session.userAgent), createdAt: session.createdAt, lastSeenAt: session.lastSeenAt || session.createdAt, expiresAt: session.expiresAt };
+}
+
+function createDigiAuthChallenge(userId) {
+  const raw = randomBytes(24).toString('base64url'); const now = Date.now(); db.digirupee.authChallenges = db.digirupee.authChallenges.filter(item => Number(item.expiresAt) > now && !item.usedAt); db.digirupee.authChallenges.push({ id: `dgc_${randomUUID().replace(/-/g, '').slice(0, 12)}`, tokenHash: createHash('sha256').update(raw).digest('hex'), userId, createdAt: now, expiresAt: now + 5 * 60 * 1000, attempts: 0, usedAt: null }); return raw;
+}
+
+function consumeDigiAuthChallenge(raw) {
+  const hash = createHash('sha256').update(String(raw || '')).digest('hex'); const challenge = db.digirupee.authChallenges.find(item => item.tokenHash === hash && !item.usedAt && Number(item.expiresAt) > Date.now()); if (!challenge || challenge.attempts >= 5) return null; return challenge;
+}
+
+function recoveryCodes() { return Array.from({ length: 8 }, () => randomBytes(5).toString('hex').toUpperCase()); }
 
 function publicDigiUser(user) {
   return {
@@ -470,6 +628,8 @@ function digirupeeAuth(req) {
   const user = db.digirupee.users.find(item => item.id === uid);
   if (!user) throw Object.assign(new Error('User not found'), { status: 401 });
   if (user.status !== 'active') throw Object.assign(new Error('Account is not active'), { status: 403 });
+  const session = digiSessionRecord(token);
+  if (session && Date.now() - Number(session.lastSeenAt || 0) >= 5 * 60 * 1000) { session.lastSeenAt = Date.now(); void persist().catch(() => {}); }
   return { token, user };
 }
 
@@ -1091,6 +1251,11 @@ function setDigiOrderStatus(order, status, timelineLabel = status, timestamp = D
   }
   if (addDigiTimeline(order, timelineLabel, timestamp)) changed = true;
   if (changed) order.updatedAt = timestamp;
+  if (changed && order.userId && status !== 'Awaiting Deposit') {
+    const notificationType = ['Detected', 'Confirming', 'USDT Confirmed', 'Late Review'].includes(status) ? 'deposit' : status === 'INR Processing' || status === 'Completed' ? 'payout' : 'order';
+    const titles = { Detected: 'USDT deposit detected', Confirming: 'USDT deposit confirming', 'USDT Confirmed': 'USDT deposit confirmed', 'INR Processing': 'INR payout processing', Completed: 'Order completed', 'Late Review': 'Deposit requires review', Expired: 'Sell order expired', Rejected: 'Sell order rejected', Failed: 'Sell order failed' };
+    createDigiNotification({ userId: order.userId, type: notificationType, title: titles[status] || `Order ${status}`, message: `${order.id} is now ${status}.`, entityType: 'sell-order', entityId: order.id, sourceKey: `order:${order.id}:status:${status}` });
+  }
   return changed;
 }
 
@@ -1371,6 +1536,7 @@ function recordDigiPayout(order, admin, raw) {
     setDigiOrderStatus(order, 'Completed', 'Completed', payout.completedAt);
     releaseDigiAddress(order, payout.completedAt);
     appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'payout.completed', entityType: 'sell-order', entityId: order.id, details: { amount: formatInrPaise(payout.totalInrPaise), references: additions.map(item => item.reference) } });
+    createDigiNotification({ userId: order.userId, type: 'payout', title: 'INR payout completed', message: `INR payout for ${order.id} has been recorded.`, entityType: 'sell-order', entityId: order.id, sourceKey: `payout:${order.id}:completed` });
     processDigiReferralQualification(order);
   }
   return { ok: true, idempotent: false };
@@ -1944,6 +2110,7 @@ function digiAdminUserDetail(user) {
   const summary = digiUserAdminSummary(user);
   return {
     ...summary,
+    security: digiSecuritySummary(user),
     profile: publicDigiProfile(user),
     payoutMethods: db.digirupee.payoutMethods.filter(method => method.userId === user.id).map(adminDigiPayoutMethod),
     recentOrders: db.digirupee.orders.filter(order => order.userId === user.id).sort((a, b) => Number(b.createdAt) - Number(a.createdAt)).slice(0, 20).map(order => publicDigiOrder(order, { admin: true }))
@@ -2038,6 +2205,7 @@ function issueDigiReward({ userId, amountMicros, type, sourceType, sourceId, des
   db.digirupee.rewardLedger.push(entry);
   db.digirupee.rewards.push({ id: `drw_${randomUUID().replace(/-/g, '').slice(0, 12)}`, userId, ledgerId: entry.id, sourceType, sourceId, amountMicros: amount, direction: 'credit', status: 'posted', createdAt: now });
   appendDigiAudit({ actorType: 'system', actorId: 'digirupee', action: 'reward.issued', entityType: 'reward', entityId: entry.id, details: { userId, sourceType, sourceId, amount: formatUsdtMicros(amount) } });
+  createDigiNotification({ userId, type: sourceType === 'referral' ? 'referral' : sourceType === 'campaign' || sourceType === 'task' ? 'campaign' : 'reward', title: 'Reward credited', message: `${formatUsdtMicros(amount)} USDT reward credited.`, entityType: 'reward', entityId: entry.id, sourceKey: `reward:${entry.id}` });
   return { entry, idempotent: false };
 }
 
@@ -2191,6 +2359,27 @@ async function digirupeeApi(req, res, path) {
     return send(res, 200, { user: digiUserAdminSummary(user) });
   }
 
+  if (req.method === 'POST' && /^\/admin\/users\/[A-Za-z0-9_-]+\/revoke-sessions$/.test(path)) {
+    const admin = adminAuth(req); requireAdminRole(admin, ['owner', 'ops']); const userId = path.split('/').at(-2); const user = db.digirupee.users.find(item => item.id === userId); if (!user) return send(res, 404, { error: 'User not found' }); const b = await body(req); const reason = String(b.reason || '').trim(); if (reason.length < 3 || reason.length > 300) return send(res, 400, { error: 'A reason between 3 and 300 characters is required' }); const count = revokeOtherDigiSessions(user.id); appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'security.sessions_revoked', entityType: 'user', entityId: user.id, details: { count, reason } }); await persist(); return send(res, 200, { revoked: count, security: digiSecuritySummary(user) });
+  }
+
+  if (req.method === 'GET' && path === '/admin/support') {
+    const admin = adminAuth(req); const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`); const status = url.searchParams.get('status'); if (status && !digiTicketStatuses.has(status)) return send(res, 400, { error: 'Unsupported ticket status' });
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, tickets: db.digirupee.supportTickets.filter(ticket => !status || ticket.status === status).sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt)).slice(0, 500).map(ticket => publicDigiTicket(ticket, true)) });
+  }
+
+  if (req.method === 'GET' && /^\/admin\/support\/[A-Za-z0-9_-]+$/.test(path)) {
+    const admin = adminAuth(req); const ticket = db.digirupee.supportTickets.find(item => item.id === path.split('/').pop()); if (!ticket) return send(res, 404, { error: 'Support ticket not found' }); return send(res, 200, { admin: { email: admin.email, role: admin.role }, ticket: publicDigiTicket(ticket, true) });
+  }
+
+  if (req.method === 'POST' && /^\/admin\/support\/[A-Za-z0-9_-]+\/messages$/.test(path)) {
+    const admin = adminAuth(req); requireAdminRole(admin, ['owner', 'ops', 'support']); const ticket = db.digirupee.supportTickets.find(item => item.id === path.split('/').at(-2)); if (!ticket) return send(res, 404, { error: 'Support ticket not found' }); if (ticket.status === 'Closed') return send(res, 409, { error: 'Closed tickets cannot receive new messages' }); const b = await body(req); const text = String(b.message || b.text || '').trim(); if (text.length < 2 || text.length > 4000) return send(res, 400, { error: 'Message length is invalid' }); const now = Date.now(); const previousStatus = ticket.status; ticket.messages.push({ id: `dsm_${randomUUID().replace(/-/g, '').slice(0, 12)}`, senderType: 'admin', senderId: admin.email, text, createdAt: now }); ticket.updatedAt = now; if (ticket.status === 'Open') ticket.status = 'In Progress'; createDigiNotification({ userId: ticket.userId, type: 'support', title: 'Support replied', message: `Your support ticket ${ticket.id} received a reply.`, entityType: 'support-ticket', entityId: ticket.id, sourceKey: `support:${ticket.id}:reply:${ticket.messages.at(-1).id}` }); appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'support.admin_replied', entityType: 'support-ticket', entityId: ticket.id, details: {} }); if (previousStatus !== ticket.status) appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'support.status_changed', entityType: 'support-ticket', entityId: ticket.id, details: { from: previousStatus, status: ticket.status, source: 'admin_reply' } }); await persist(); return send(res, 200, { ticket: publicDigiTicket(ticket, true) });
+  }
+
+  if (req.method === 'PATCH' && /^\/admin\/support\/[A-Za-z0-9_-]+\/status$/.test(path)) {
+    const admin = adminAuth(req); requireAdminRole(admin, ['owner', 'ops', 'support']); const ticket = db.digirupee.supportTickets.find(item => item.id === path.split('/').at(-2)); if (!ticket) return send(res, 404, { error: 'Support ticket not found' }); const b = await body(req); const status = String(b.status || '').trim(); if (!digiTicketStatuses.has(status)) return send(res, 400, { error: 'Unsupported ticket status' }); if (ticket.status === status) return send(res, 200, { ticket: publicDigiTicket(ticket, true), idempotent: true }); const now = Date.now(); ticket.status = status; ticket.updatedAt = now; ticket.closedAt = status === 'Closed' ? now : null; createDigiNotification({ userId: ticket.userId, type: 'support', title: 'Support ticket updated', message: `${ticket.id} is now ${status}.`, entityType: 'support-ticket', entityId: ticket.id, sourceKey: `support:${ticket.id}:status:${status}` }); appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'support.status_changed', entityType: 'support-ticket', entityId: ticket.id, details: { status } }); await persist(); return send(res, 200, { ticket: publicDigiTicket(ticket, true) });
+  }
+
   if (req.method === 'GET' && /^\/admin\/tron-addresses\/[A-Za-z0-9_-]+\/history$/.test(path)) {
     const admin = adminAuth(req);
     const id = path.split('/').at(-2);
@@ -2223,7 +2412,9 @@ async function digirupeeApi(req, res, path) {
         activeMonitoredOrders
       },
       pendingPayouts: db.digirupee.orders.filter(order => ['USDT Confirmed', 'INR Processing'].includes(order.status)).length,
-      pendingReviews: db.digirupee.orders.filter(order => order.status === 'Late Review').length
+      pendingReviews: db.digirupee.orders.filter(order => order.status === 'Late Review').length,
+      openSupportTickets: db.digirupee.supportTickets.filter(ticket => ['Open', 'In Progress'].includes(ticket.status)).length,
+      activeDigiSessions: db.digirupee.sessions.filter(session => !session.revokedAt && Number(session.expiresAt) > Date.now()).length
     });
   }
 
@@ -2339,6 +2530,14 @@ async function digirupeeApi(req, res, path) {
     return send(res, 200, { admin: { email: admin.email, role: admin.role }, metrics: digiRewardMetrics(), ledger: entries.slice(0, 500).map(rewardLedgerAdmin) });
   }
 
+  if (req.method === 'GET' && path === '/admin/notifications') {
+    const admin = adminAuth(req); const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`); const type = url.searchParams.get('type'); const notifications = db.digirupee.notifications.filter(item => !type || item.type === type).sort((a, b) => Number(b.createdAt) - Number(a.createdAt)).slice(0, 500).map(item => { const user = db.digirupee.users.find(candidate => candidate.id === item.userId); return { ...publicDigiNotification(item), user: user ? { id: user.id, name: user.profile?.fullName || '', email: user.email } : { id: item.userId } }; }); return send(res, 200, { admin: { email: admin.email, role: admin.role }, notifications });
+  }
+
+  if (req.method === 'POST' && path === '/admin/notifications/broadcast') {
+    const admin = adminAuth(req); requireAdminRole(admin, ['owner', 'ops']); const b = await body(req); const title = String(b.title || '').trim(); const message = String(b.message || '').trim(); const target = String(b.target || '').trim().toLowerCase(); if (title.length < 3 || title.length > 120 || message.length < 3 || message.length > 500 || !['all', 'active'].includes(target)) return send(res, 400, { error: 'Broadcast fields are invalid' }); const users = db.digirupee.users.filter(user => target === 'all' || user.status === 'active'); const broadcastId = `broadcast:${randomUUID()}`; let created = 0; for (const user of users) if (createDigiNotification({ userId: user.id, type: 'system', title, message, entityType: 'broadcast', entityId: broadcastId, sourceKey: `${broadcastId}:${user.id}` })) created += 1; appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'notification.broadcast', entityType: 'notification', entityId: broadcastId, details: { target, recipientCount: created } }); await persist(); return send(res, 201, { broadcastId, recipientCount: created });
+  }
+
   if (req.method === 'POST' && /^\/admin\/users\/[A-Za-z0-9_-]+\/rewards\/adjust$/.test(path)) {
     const admin = adminAuth(req);
     requireAdminRole(admin, ['owner', 'ops']);
@@ -2364,6 +2563,7 @@ async function digirupeeApi(req, res, path) {
     const entry = { id: `drl_${randomUUID().replace(/-/g, '').slice(0, 12)}`, userId, type: 'admin_adjustment', amountMicros: amount, direction, sourceType: 'admin_adjustment', sourceId: key, description: reason, createdAt: now, status: 'posted', idempotencyKey: key, adminId: admin.email };
     db.digirupee.rewardLedger.push(entry);
     db.digirupee.rewards.push({ id: `drw_${randomUUID().replace(/-/g, '').slice(0, 12)}`, userId, ledgerId: entry.id, sourceType: 'admin_adjustment', sourceId: key, amountMicros: amount, direction, status: 'posted', createdAt: now });
+    createDigiNotification({ userId, type: 'reward', title: direction === 'credit' ? 'Reward credited' : 'Reward balance adjusted', message: `${direction === 'credit' ? '+' : '-'}${formatUsdtMicros(amount)} USDT reward adjustment posted.`, entityType: 'reward', entityId: entry.id, sourceKey: `reward:${entry.id}` });
     appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'reward.adjusted', entityType: 'reward', entityId: entry.id, details: { userId, amount: formatUsdtMicros(amount), direction, reason } });
     await persist();
     return send(res, 201, { reward: rewardLedgerAdmin(entry), balance: formatUsdtMicros(rewardBalanceMicros(userId)) });
@@ -2502,8 +2702,9 @@ async function digirupeeApi(req, res, path) {
       if (!task) return send(res, 409, { error: 'The claimed task no longer exists' });
       const reward = issueDigiReward({ userId: claim.userId, amountMicros: task.rewardAmountMicros, type: 'task', sourceType: 'task', sourceId: claim.id, description: task.title });
       if (reward.error) return send(res, 400, { error: reward.error }); claim.rewardLedgerId = reward.entry.id; claim.status = 'credited';
+      createDigiNotification({ userId: claim.userId, type: 'campaign', title: 'Task claim approved', message: `Your task claim was approved and ${formatUsdtMicros(task.rewardAmountMicros)} USDT was credited.`, entityType: 'task-claim', entityId: claim.id, sourceKey: `task-claim:${claim.id}:approved` });
       appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'task.approved', entityType: 'task-claim', entityId: claim.id, details: { reward: formatUsdtMicros(task.rewardAmountMicros) } });
-    } else appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'task.rejected', entityType: 'task-claim', entityId: claim.id, details: { reason: note } });
+    } else { createDigiNotification({ userId: claim.userId, type: 'campaign', title: 'Task claim rejected', message: `Your task claim was rejected${note ? `: ${note}` : '.'}`, entityType: 'task-claim', entityId: claim.id, sourceKey: `task-claim:${claim.id}:rejected` }); appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'task.rejected', entityType: 'task-claim', entityId: claim.id, details: { reason: note } }); }
     await persist(); return send(res, 200, { claim });
   }
 
@@ -2739,11 +2940,27 @@ async function digirupeeApi(req, res, path) {
     }
     if (user.status !== 'active') return send(res, 403, { error: 'Account is not active' });
     if (!String(user.passwordHash || '').startsWith('scrypt$')) user.passwordHash = hashPassword(password);
+    ensureDigiSecurityFields();
+    if (user.security.twoFactor.enabled) {
+      const challengeId = createDigiAuthChallenge(user.id);
+      await persist();
+      return send(res, 200, { twoFactorRequired: true, challengeId, expiresIn: 300 });
+    }
     const token = makeDigiSession(user.id);
-    registerDigiSession(user.id, token);
+    const session = registerDigiSession(user.id, token, req);
+    user.security.lastLoginAt = Date.now();
+    createDigiNotification({ userId: user.id, type: 'security', title: 'New session created', message: `A new ${session.deviceLabel} session was created.`, entityType: 'session', entityId: session.id, sourceKey: `security:session:${session.id}` });
     appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'user.login', entityType: 'session', entityId: user.id });
     await persist();
     return send(res, 200, { ...digiUserResponse(user), token, expiresIn: sessionMaxAge }, { 'Set-Cookie': digiSessionCookie(req, token) });
+  }
+
+  if (req.method === 'POST' && path === '/auth/2fa') {
+    limitRequest(req, 'digirupee-2fa-login', 10, 15 * 60 * 1000);
+    const b = await body(req); const rawChallenge = String(b.challengeId || '').trim(); const challenge = consumeDigiAuthChallenge(rawChallenge); if (!challenge) return send(res, 401, { error: 'Invalid or expired authentication challenge' });
+    const user = db.digirupee.users.find(item => item.id === challenge.userId); if (!user || user.status !== 'active') return send(res, 401, { error: 'Invalid authentication challenge' }); ensureDigiSecurityFields(); const check = verifyDigiSecondFactor(user, b.code); challenge.attempts += 1;
+    if (!check.valid) { await persist(); return send(res, 401, { error: 'Invalid authentication code' }); }
+    challenge.usedAt = Date.now(); const token = makeDigiSession(user.id); const session = registerDigiSession(user.id, token, req); user.security.lastLoginAt = Date.now(); createDigiNotification({ userId: user.id, type: 'security', title: 'New session created', message: `A new ${session.deviceLabel} session was created.`, entityType: 'session', entityId: session.id, sourceKey: `security:session:${session.id}` }); appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'user.login', entityType: 'session', entityId: session.id, details: { secondFactor: check.kind } }); if (check.kind === 'recovery') appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'security.recovery_code_used', entityType: 'security', entityId: user.id, details: {} }); await persist(); return send(res, 200, { ...digiUserResponse(user), token, expiresIn: sessionMaxAge }, { 'Set-Cookie': digiSessionCookie(req, token) });
   }
 
   if (req.method === 'POST' && path === '/auth/logout') {
@@ -2752,6 +2969,7 @@ async function digirupeeApi(req, res, path) {
     const session = revokeDigiSession(token);
     if (uid && session) {
       appendDigiAudit({ actorType: 'user', actorId: uid, action: 'user.logout', entityType: 'session', entityId: uid });
+      appendDigiAudit({ actorType: 'user', actorId: uid, action: 'security.session_revoked', entityType: 'session', entityId: session.id || uid, details: { reason: 'logout' } });
       await persist();
     }
     return send(res, 200, { ok: true }, { 'Set-Cookie': clearDigiSessionCookie(req) });
@@ -2795,6 +3013,84 @@ async function digirupeeApi(req, res, path) {
     appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'profile.updated', entityType: 'profile', entityId: user.id, details: changes });
     await persist();
     return send(res, 200, digiUserResponse(user));
+  }
+
+  if (req.method === 'GET' && path === '/support') {
+    const { user } = digirupeeAuth(req);
+    const tickets = db.digirupee.supportTickets.filter(ticket => ticket.userId === user.id).sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt)).slice(0, 100).map(ticket => publicDigiTicket(ticket));
+    return send(res, 200, { tickets });
+  }
+
+  if (req.method === 'POST' && path === '/support') {
+    limitRequest(req, 'digirupee-support', 10, 60 * 60 * 1000);
+    const { user } = digirupeeAuth(req); const b = await body(req); const category = String(b.category || b.type || '').trim().toUpperCase(); const subject = String(b.subject || '').trim(); const message = String(b.message || '').trim(); const orderId = String(b.orderId || '').trim();
+    if (!digiTicketCategories.has(category)) return send(res, 400, { error: 'Choose a valid support category' });
+    if (subject.length < 4 || subject.length > 120 || message.length < 10 || message.length > 4000) return send(res, 400, { error: 'Subject or message length is invalid' });
+    if (orderId && !db.digirupee.orders.some(order => order.id === orderId && order.userId === user.id)) return send(res, 404, { error: 'Order not found' });
+    const recent = db.digirupee.supportTickets.find(ticket => ticket.userId === user.id && ticket.subject === subject && ticket.message === message && Date.now() - Number(ticket.createdAt) < 60 * 1000);
+    if (recent) return send(res, 409, { error: 'A matching support ticket was submitted recently', ticket: publicDigiTicket(recent) });
+    const now = Date.now(); const ticket = { id: `dst_${randomUUID().replace(/-/g, '').slice(0, 12)}`, userId: user.id, category, subject, message, orderId: orderId || null, priority: 'normal', status: 'Open', createdAt: now, updatedAt: now, closedAt: null, messages: [{ id: `dsm_${randomUUID().replace(/-/g, '').slice(0, 12)}`, senderType: 'user', senderId: user.id, text: message, createdAt: now }] };
+    db.digirupee.supportTickets.push(ticket); appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'support.created', entityType: 'support-ticket', entityId: ticket.id, details: { category, orderId: orderId || null } }); await persist(); return send(res, 201, { ticket: publicDigiTicket(ticket) });
+  }
+
+  if (req.method === 'GET' && /^\/support\/[A-Za-z0-9_-]+$/.test(path)) {
+    const { user } = digirupeeAuth(req); const ticket = db.digirupee.supportTickets.find(item => item.id === path.split('/').pop() && item.userId === user.id); if (!ticket) return send(res, 404, { error: 'Support ticket not found' }); return send(res, 200, { ticket: publicDigiTicket(ticket) });
+  }
+
+  if (req.method === 'POST' && /^\/support\/[A-Za-z0-9_-]+\/messages$/.test(path)) {
+    limitRequest(req, 'digirupee-support-message', 20, 60 * 60 * 1000); const { user } = digirupeeAuth(req); const ticket = db.digirupee.supportTickets.find(item => item.id === path.split('/').at(-2) && item.userId === user.id); if (!ticket) return send(res, 404, { error: 'Support ticket not found' }); if (ticket.status === 'Closed') return send(res, 409, { error: 'Closed tickets cannot receive new messages' }); const b = await body(req); const text = String(b.message || b.text || '').trim(); if (text.length < 2 || text.length > 4000) return send(res, 400, { error: 'Message length is invalid' }); const now = Date.now(); ticket.messages.push({ id: `dsm_${randomUUID().replace(/-/g, '').slice(0, 12)}`, senderType: 'user', senderId: user.id, text, createdAt: now }); ticket.updatedAt = now; appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'support.user_replied', entityType: 'support-ticket', entityId: ticket.id, details: {} }); await persist(); return send(res, 200, { ticket: publicDigiTicket(ticket) });
+  }
+
+  if (req.method === 'POST' && /^\/support\/[A-Za-z0-9_-]+\/close$/.test(path)) {
+    const { user } = digirupeeAuth(req); const ticket = db.digirupee.supportTickets.find(item => item.id === path.split('/').at(-2) && item.userId === user.id); if (!ticket) return send(res, 404, { error: 'Support ticket not found' }); if (ticket.status === 'Closed') return send(res, 200, { ticket: publicDigiTicket(ticket), idempotent: true }); const now = Date.now(); ticket.status = 'Closed'; ticket.closedAt = now; ticket.updatedAt = now; appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'support.status_changed', entityType: 'support-ticket', entityId: ticket.id, details: { status: 'Closed' } }); await persist(); return send(res, 200, { ticket: publicDigiTicket(ticket) });
+  }
+
+  if (req.method === 'GET' && path === '/notifications') {
+    const { user } = digirupeeAuth(req); const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`); const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') || 50))); const offset = Math.max(0, Number(url.searchParams.get('offset') || 0)); const notifications = db.digirupee.notifications.filter(item => item.userId === user.id).sort((a, b) => Number(b.createdAt) - Number(a.createdAt)); return send(res, 200, { notifications: notifications.slice(offset, offset + limit).map(publicDigiNotification), total: notifications.length, unreadCount: notifications.filter(item => !item.readAt).length });
+  }
+
+  if (req.method === 'GET' && path === '/notifications/unread-count') {
+    const { user } = digirupeeAuth(req); return send(res, 200, { unreadCount: db.digirupee.notifications.filter(item => item.userId === user.id && !item.readAt).length });
+  }
+
+  if (req.method === 'PATCH' && /^\/notifications\/[A-Za-z0-9_-]+\/read$/.test(path)) {
+    const { user } = digirupeeAuth(req); const notification = db.digirupee.notifications.find(item => item.id === path.split('/').at(-2) && item.userId === user.id); if (!notification) return send(res, 404, { error: 'Notification not found' }); if (!notification.readAt) { notification.readAt = Date.now(); await persist(); } return send(res, 200, { notification: publicDigiNotification(notification) });
+  }
+
+  if (req.method === 'POST' && path === '/notifications/read-all') {
+    const { user } = digirupeeAuth(req); const now = Date.now(); let changed = false; for (const notification of db.digirupee.notifications.filter(item => item.userId === user.id && !item.readAt)) { notification.readAt = now; changed = true; } if (changed) await persist(); return send(res, 200, { ok: true });
+  }
+
+  if (req.method === 'GET' && path === '/security/sessions') {
+    const { user, token } = digirupeeAuth(req); const currentHash = digiSessionHash(token); const sessions = db.digirupee.sessions.filter(item => (item.userId || item.uid) === user.id && !item.revokedAt && Number(item.expiresAt) > Date.now()).sort((a, b) => Number(b.lastSeenAt || b.createdAt) - Number(a.lastSeenAt || a.createdAt)); return send(res, 200, { sessions: sessions.map(item => publicDigiSession(item, currentHash)) });
+  }
+
+  if (req.method === 'DELETE' && /^\/security\/sessions\/[A-Za-z0-9_-]+$/.test(path)) {
+    const { user, token } = digirupeeAuth(req); const id = path.split('/').pop(); const current = digiSessionRecord(token); const session = db.digirupee.sessions.find(item => item.id === id && (item.userId || item.uid) === user.id); if (!session) return send(res, 404, { error: 'Session not found' }); if (current?.id === session.id) return send(res, 400, { error: 'Use logout to revoke the current session' }); if (!session.revokedAt) { session.revokedAt = Date.now(); appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'security.session_revoked', entityType: 'session', entityId: session.id, details: {} }); await persist(); } return send(res, 200, { ok: true });
+  }
+
+  if (req.method === 'POST' && path === '/security/sessions/revoke-others') {
+    const { user, token } = digirupeeAuth(req); const current = digiSessionRecord(token); const count = revokeOtherDigiSessions(user.id, current?.id); if (count) { createDigiNotification({ userId: user.id, type: 'security', title: 'Other sessions revoked', message: `${count} other session(s) were revoked.`, entityType: 'security', entityId: user.id, sourceKey: `security:revoke-others:${current?.id}:${Date.now()}` }); appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'security.sessions_revoked', entityType: 'session', entityId: user.id, details: { count } }); await persist(); } return send(res, 200, { revoked: count });
+  }
+
+  if (req.method === 'POST' && path === '/security/change-password') {
+    const { user, token } = digirupeeAuth(req); const b = await body(req); const currentPassword = String(b.currentPassword || ''); const newPassword = String(b.newPassword || ''); if (!verifyPassword(currentPassword, user.passwordHash)) return send(res, 401, { error: 'Current password is incorrect' }); if (!validPassword(newPassword)) return send(res, 400, { error: 'Password must be 8 to 128 characters' }); if (verifyPassword(newPassword, user.passwordHash)) return send(res, 400, { error: 'Choose a different password' }); user.passwordHash = hashPassword(newPassword); const current = digiSessionRecord(token); const revoked = revokeOtherDigiSessions(user.id, current?.id); createDigiNotification({ userId: user.id, type: 'security', title: 'Password changed', message: 'Your digiRupee password was changed successfully.', entityType: 'security', entityId: user.id, sourceKey: `security:password:${user.id}:${Date.now()}` }); appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'security.password_changed', entityType: 'user', entityId: user.id, details: { otherSessionsRevoked: revoked } }); await persist(); return send(res, 200, { ok: true, otherSessionsRevoked: revoked });
+  }
+
+  if (req.method === 'GET' && path === '/security/2fa/status') {
+    const { user } = digirupeeAuth(req); return send(res, 200, { enabled: !!user.security?.twoFactor?.enabled, backupCodesRemaining: (user.security?.twoFactor?.backupCodeHashes || []).filter(item => !item.usedAt).length });
+  }
+
+  if (req.method === 'POST' && path === '/security/2fa/setup') {
+    const { user } = digirupeeAuth(req); ensureDigiSecurityFields(); if (user.security?.twoFactor?.enabled) return send(res, 409, { error: 'Two-factor authentication is already enabled' }); if (!digiTwoFactorEncryptionKey) return send(res, 503, { error: 'digiRupee 2FA encryption is not configured' }); const encodedSecret = base32Encode(randomBytes(20)); user.security.twoFactor.pendingSecretCiphertext = encryptDigiSecret(encodedSecret); const otpauth = `otpauth://totp/digiRupee:${encodeURIComponent(user.email)}?secret=${encodedSecret}&issuer=digiRupee`; appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'security.2fa_setup', entityType: 'user', entityId: user.id, details: {} }); await persist(); return send(res, 200, { secret: encodedSecret, otpauthUri: otpauth });
+  }
+
+  if (req.method === 'POST' && path === '/security/2fa/enable') {
+    const { user } = digirupeeAuth(req); if (!user.security?.twoFactor?.pendingSecretCiphertext) return send(res, 409, { error: 'Start 2FA setup first' }); const b = await body(req); const secret = decryptDigiSecret(user.security.twoFactor.pendingSecretCiphertext); if (!secret || !validTotp(secret, b.code)) return send(res, 400, { error: 'Invalid verification code' }); const codes = recoveryCodes(); user.security.twoFactor = { enabled: true, secretCiphertext: user.security.twoFactor.pendingSecretCiphertext, pendingSecretCiphertext: null, backupCodeHashes: codes.map(code => ({ hash: hashRecoveryCode(code), usedAt: null })), enabledAt: Date.now() }; createDigiNotification({ userId: user.id, type: 'security', title: 'Two-factor authentication enabled', message: 'Two-factor authentication is now enabled on your account.', entityType: 'security', entityId: user.id, sourceKey: `security:2fa-enabled:${user.id}:${user.security.twoFactor.enabledAt}` }); appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'security.2fa_enabled', entityType: 'user', entityId: user.id, details: {} }); await persist(); return send(res, 200, { enabled: true, recoveryCodes: codes });
+  }
+
+  if (req.method === 'POST' && path === '/security/2fa/disable') {
+    const { user } = digirupeeAuth(req); if (!user.security?.twoFactor?.enabled) return send(res, 409, { error: 'Two-factor authentication is not enabled' }); const b = await body(req); if (!verifyPassword(String(b.currentPassword || ''), user.passwordHash)) return send(res, 401, { error: 'Current password is incorrect' }); const check = verifyDigiSecondFactor(user, b.code); if (!check.valid) return send(res, 400, { error: 'Invalid verification code' }); user.security.twoFactor = { enabled: false, secretCiphertext: null, pendingSecretCiphertext: null, backupCodeHashes: [], enabledAt: null }; createDigiNotification({ userId: user.id, type: 'security', title: 'Two-factor authentication disabled', message: 'Two-factor authentication was disabled on your account.', entityType: 'security', entityId: user.id, sourceKey: `security:2fa-disabled:${user.id}:${Date.now()}` }); appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'security.2fa_disabled', entityType: 'user', entityId: user.id, details: { verification: check.kind } }); if (check.kind === 'recovery') appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'security.recovery_code_used', entityType: 'security', entityId: user.id, details: {} }); await persist(); return send(res, 200, { enabled: false });
   }
 
   if (req.method === 'POST' && path === '/quotes') {
@@ -2945,6 +3241,7 @@ async function digirupeeApi(req, res, path) {
     quote.status = 'consumed';
     quote.consumedOrderId = order.id;
     appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'order.created', entityType: 'sell-order', entityId: order.id, details: { quoteId: quote.id, payoutType: order.payoutType, usdtAmount: formatUsdtMicros(order.usdtMicros), rate: formatInrPaise(order.lockedRatePaise), inrAmount: formatInrPaise(order.inrPaise), depositAddress: maskDigiValue(address.address, 5, 5), payoutMethodIds: order.payoutMethodIds } });
+    createDigiNotification({ userId: user.id, type: 'order', title: 'Sell order created', message: `${order.id} is awaiting USDT deposit.`, entityType: 'sell-order', entityId: order.id, sourceKey: `order:${order.id}:created` });
     await persist();
     return send(res, 201, { order: publicDigiOrder(order) });
   }
@@ -3641,7 +3938,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-if (ensureDigiReferralCodes() || ensureDigiAddressAssignments()) await persist();
+if (ensureDigiReferralCodes() || ensureDigiAddressAssignments() || ensureDigiSecurityFields() || ensureDigiSessionFields()) await persist();
 
 server.listen(port, '0.0.0.0', () => {
   console.log(`LOKTRON website listening on ${port}`);
