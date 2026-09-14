@@ -136,6 +136,7 @@ const defaultData = {
   bankLedger: [],
   tickets: [],
   auditLog: [],
+  adminSessions: [],
   notifications: [{
     id: 'n1',
     userId: 'usr_demo',
@@ -204,6 +205,7 @@ async function loadDb() {
       tickets: Array.isArray(parsed.tickets) ? parsed.tickets : [],
       notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
       auditLog: Array.isArray(parsed.auditLog) ? parsed.auditLog : [],
+      adminSessions: Array.isArray(parsed.adminSessions) ? parsed.adminSessions : [],
       digirupee: {
         ...structuredClone(defaultData.digirupee),
         ...(parsed.digirupee || {}),
@@ -330,13 +332,28 @@ function makeSession(uid) {
 }
 
 function makeAdminSession(admin) {
+  const now = Date.now();
+  const id = 'ads_' + randomUUID().replace(/-/g, '').slice(0, 16);
   const payload = Buffer.from(JSON.stringify({
     email: admin.email,
     role: admin.role,
-    exp: Date.now() + adminSessionMaxAge * 1000
+    jti: id,
+    exp: now + adminSessionMaxAge * 1000
   })).toString('base64url');
   const sig = createHmac('sha256', sessionSecret).update(`admin:${payload}`).digest('base64url');
-  return `${payload}.${sig}`;
+  const token = `${payload}.${sig}`;
+  db.adminSessions = Array.isArray(db.adminSessions) ? db.adminSessions : [];
+  db.adminSessions = db.adminSessions.filter(item => !item.revokedAt && Number(item.expiresAt) > now);
+  db.adminSessions.push({
+    id,
+    tokenHash: createHash('sha256').update(token).digest('hex'),
+    email: admin.email,
+    role: admin.role,
+    createdAt: now,
+    expiresAt: now + adminSessionMaxAge * 1000,
+    revokedAt: null
+  });
+  return token;
 }
 
 function verifyAdminSession(token) {
@@ -347,13 +364,28 @@ function verifyAdminSession(token) {
     const actual = Buffer.from(sig, 'base64url');
     if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return '';
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    if (!data.email || Number(data.exp) < Date.now()) return '';
+    if (!data.email || !data.jti || Number(data.exp) < Date.now()) return '';
     const admin = findAdmin(data.email);
     if (!admin || admin.role !== data.role) return '';
+    const tokenHash = createHash('sha256').update(String(token)).digest('hex');
+    const session = (db.adminSessions || []).find(item =>
+      item.id === data.jti &&
+      item.tokenHash === tokenHash &&
+      !item.revokedAt &&
+      Number(item.expiresAt) > Date.now()
+    );
+    if (!session) return '';
     return admin;
   } catch {
     return null;
   }
+}
+
+function revokeAdminSession(token) {
+  const tokenHash = createHash('sha256').update(String(token || '')).digest('hex');
+  const session = (db.adminSessions || []).find(item => item.tokenHash === tokenHash && !item.revokedAt);
+  if (session) session.revokedAt = Date.now();
+  return session;
 }
 
 function verifySession(token) {
@@ -693,6 +725,11 @@ function indiaDayKey(timestamp = Date.now()) {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+function nextIndiaMidnight(timestamp = Date.now()) {
+  const [year, month, day] = indiaDayKey(timestamp).split('-').map(Number);
+  return Date.UTC(year, month - 1, day + 1, 0, 0, 0, 0) - (5 * 60 + 30) * 60 * 1000;
+}
+
 function maskDigiValue(value, keepStart = 2, keepEnd = 2) {
   const text = String(value || '');
   if (text.length <= keepStart + keepEnd) return '*'.repeat(text.length);
@@ -708,7 +745,7 @@ function payoutMethodUsesActiveOrder(methodId) {
 function dailyMethodUsagePaise(methodId, timestamp = Date.now()) {
   const today = indiaDayKey(timestamp);
   return db.digirupee.orders.reduce((total, order) => {
-    if (indiaDayKey(order.createdAt) !== today || digiFinalStatuses.has(order.status)) return total;
+    if (indiaDayKey(order.createdAt) !== today || ['Expired', 'Failed', 'Rejected'].includes(order.status)) return total;
     if (order.payoutMethodId === methodId) return total + Number(order.inrPaise || 0);
     return total + (order.allocations || [])
       .filter(item => item.payoutMethodId === methodId)
@@ -978,31 +1015,78 @@ function autoAllocateDigiBank(userId, totalPaise, candidateIds = []) {
   const requested = new Set(candidateIds.map(item => String(item).trim()).filter(Boolean));
   const methods = db.digirupee.payoutMethods
     .filter(method => method.userId === userId && method.type === 'BANK' && method.enabled && (!requested.size || requested.has(method.id)))
-    .map(method => ({ method, maxAvailable: Math.min(parseInrPaise(method.maxInr) || 0, payoutMethodRemainingPaise(method)) }))
-    .filter(item => item.maxAvailable >= (parseInrPaise(item.method.minInr) || Number.MAX_SAFE_INTEGER));
+    .map(method => ({
+      method,
+      min: parseInrPaise(method.minInr) || 0,
+      maxAvailable: Math.min(parseInrPaise(method.maxInr) || 0, payoutMethodRemainingPaise(method))
+    }))
+    .filter(item => item.maxAvailable >= item.min && item.maxAvailable > 0);
+
   if (!methods.length) return null;
 
   const single = methods
-    .filter(item => totalPaise >= (parseInrPaise(item.method.minInr) || 0) && totalPaise <= item.maxAvailable)
+    .filter(item => totalPaise >= item.min && totalPaise <= item.maxAvailable)
     .sort((a, b) => a.maxAvailable - b.maxAvailable)[0];
   if (single) return [{ payoutMethodId: single.method.id, inrPaise: totalPaise }];
 
-  const minimumTotal = methods.reduce((sum, item) => sum + (parseInrPaise(item.method.minInr) || 0), 0);
-  const capacityTotal = methods.reduce((sum, item) => sum + item.maxAvailable, 0);
-  if (totalPaise < minimumTotal || totalPaise > capacityTotal) return null;
+  const sorted = [...methods].sort((a, b) => b.maxAvailable - a.maxAvailable);
+  let chosen = null;
 
-  const allocations = methods.map(item => ({
+  if (sorted.length <= 16) {
+    const visit = (index, picked, minSum, maxSum) => {
+      if (chosen || minSum > totalPaise) return;
+      if (picked.length && minSum <= totalPaise && maxSum >= totalPaise) {
+        chosen = [...picked];
+        return;
+      }
+      if (index >= sorted.length) return;
+      const remainingCapacity = sorted.slice(index).reduce((sum, item) => sum + item.maxAvailable, 0);
+      if (maxSum + remainingCapacity < totalPaise) return;
+      picked.push(sorted[index]);
+      visit(index + 1, picked, minSum + sorted[index].min, maxSum + sorted[index].maxAvailable);
+      picked.pop();
+      visit(index + 1, picked, minSum, maxSum);
+    };
+    for (let targetCount = 2; targetCount <= sorted.length && !chosen; targetCount++) {
+      const visitCount = (index, picked, minSum, maxSum) => {
+        if (chosen || minSum > totalPaise || picked.length > targetCount) return;
+        if (picked.length === targetCount) {
+          if (minSum <= totalPaise && maxSum >= totalPaise) chosen = [...picked];
+          return;
+        }
+        if (index >= sorted.length || picked.length + (sorted.length - index) < targetCount) return;
+        picked.push(sorted[index]);
+        visitCount(index + 1, picked, minSum + sorted[index].min, maxSum + sorted[index].maxAvailable);
+        picked.pop();
+        visitCount(index + 1, picked, minSum, maxSum);
+      };
+      visitCount(0, [], 0, 0);
+    }
+  } else {
+    for (let count = 2; count <= sorted.length; count++) {
+      const subset = sorted.slice(0, count);
+      const minSum = subset.reduce((sum, item) => sum + item.min, 0);
+      const maxSum = subset.reduce((sum, item) => sum + item.maxAvailable, 0);
+      if (minSum <= totalPaise && maxSum >= totalPaise) { chosen = subset; break; }
+    }
+  }
+
+  if (!chosen) return null;
+  const allocations = chosen.map(item => ({
     payoutMethodId: item.method.id,
-    inrPaise: parseInrPaise(item.method.minInr) || 0,
+    inrPaise: item.min,
     maxAvailable: item.maxAvailable
   }));
-  let remaining = totalPaise - minimumTotal;
+  let remaining = totalPaise - allocations.reduce((sum, item) => sum + item.inrPaise, 0);
   for (const allocation of allocations) {
     const extra = Math.min(remaining, allocation.maxAvailable - allocation.inrPaise);
     allocation.inrPaise += extra;
     remaining -= extra;
+    if (!remaining) break;
   }
-  return remaining === 0 ? allocations.map(({ payoutMethodId, inrPaise }) => ({ payoutMethodId, inrPaise })) : null;
+  return remaining === 0
+    ? allocations.map(({ payoutMethodId, inrPaise }) => ({ payoutMethodId, inrPaise }))
+    : null;
 }
 
 function validateDigiPayoutSelection({ userId, payoutType, totalPaise, payoutMethodId, allocations, candidateIds = [], autoSplit = true }) {
@@ -2078,7 +2162,7 @@ function digiUserAdminSummary(user) {
     lastActiveAt: digiUserActivityAt(user.id) || null,
     completedOrders: completed.length,
     activeOrders: activeOrders.length,
-    usdtVolume: formatUsdtMicros(orders.reduce((sum, order) => sum + Number(order.usdtMicros || 0), 0)),
+    usdtVolume: formatUsdtMicros(completed.reduce((sum, order) => sum + Number(order.usdtMicros || 0), 0)),
     inrSettled: formatInrPaise(paidInrPaise),
     payoutMethodCount: db.digirupee.payoutMethods.filter(method => method.userId === user.id).length,
     rewardBalance: formatUsdtMicros(rewardBalanceMicros(user.id))
@@ -2096,7 +2180,7 @@ function digiOverviewMetrics() {
     activeUsers,
     totalOrders: orders.length,
     byStatus: Object.fromEntries([...new Set([...digiActiveStatuses, ...digiFinalStatuses])].map(status => [status, orders.filter(order => order.status === status).length])),
-    totalUsdtVolume: formatUsdtMicros(orders.reduce((sum, order) => sum + Number(order.usdtMicros || 0), 0)),
+    totalUsdtVolume: formatUsdtMicros(settledOrders.reduce((sum, order) => sum + Number(order.usdtMicros || 0), 0)),
     totalInrSettled: formatInrPaise(settledOrders.reduce((sum, order) => sum + Number(order.payout?.paidInrPaise || 0), 0)),
     pendingPayouts: pendingPayouts.length,
     pendingReviews: orders.filter(order => order.status === 'Late Review').length,
@@ -2272,7 +2356,7 @@ function adminDigiCampaign(campaign) {
 }
 
 function campaignClaimCount(campaignId) {
-  return db.digirupee.taskClaims.filter(claim => claim.campaignId === campaignId && ['approved', 'credited'].includes(claim.status)).length;
+  return db.digirupee.taskClaims.filter(claim => claim.campaignId === campaignId && ['pending_review', 'approved', 'credited'].includes(claim.status)).length;
 }
 
 function referralPolicy() {
@@ -2354,7 +2438,8 @@ async function digirupeeApi(req, res, path) {
     if (reason.length < 3 || reason.length > 500) return send(res, 400, { error: 'A reason between 3 and 500 characters is required' });
     if (user.status === status) return send(res, 200, { user: digiUserAdminSummary(user), idempotent: true });
     user.status = status;
-    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: `user.${status}`, entityType: 'user', entityId: user.id, details: { status, reason } });
+    const revokedSessions = status === 'suspended' ? revokeOtherDigiSessions(user.id) : 0;
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: `user.${status}`, entityType: 'user', entityId: user.id, details: { status, reason, revokedSessions } });
     await persist();
     return send(res, 200, { user: digiUserAdminSummary(user) });
   }
@@ -2453,10 +2538,11 @@ async function digirupeeApi(req, res, path) {
     const taskId = String(b.taskId || '').trim();
     const task = (campaign.tasks || []).find(item => item.id === taskId);
     if (!task || !taskIsCurrent(task)) return send(res, 400, { error: 'Task is not currently available' });
-    const existing = db.digirupee.taskClaims.find(claim => claim.userId === user.id && claim.taskId === task.id);
-    if (existing) return send(res, 200, { claim: { id: existing.id, status: existing.status }, idempotent: true });
+    const claimKey = String(req.headers['idempotency-key'] || '').trim();
+    const replay = claimKey ? db.digirupee.taskClaims.find(claim => claim.userId === user.id && claim.taskId === task.id && claim.idempotencyKey === claimKey) : null;
+    if (replay) return send(res, 200, { claim: { id: replay.id, status: replay.status }, idempotent: true });
     if (campaign.maxClaims && campaignClaimCount(campaign.id) >= Number(campaign.maxClaims)) return send(res, 409, { error: 'Campaign claim limit has been reached' });
-    const priorUserClaims = db.digirupee.taskClaims.filter(claim => claim.userId === user.id && claim.taskId === task.id).length;
+    const priorUserClaims = db.digirupee.taskClaims.filter(claim => claim.userId === user.id && claim.taskId === task.id && claim.status !== 'rejected').length;
     if (task.maxClaimsPerUser && priorUserClaims >= Number(task.maxClaimsPerUser)) return send(res, 409, { error: 'You have reached the claim limit for this task' });
     const now = Date.now();
     const claim = { id: `dtc_${randomUUID().replace(/-/g, '').slice(0, 12)}`, campaignId, taskId, userId: user.id, submittedAt: now, note: String(b.note || '').trim().slice(0, 500), status: 'pending_review', reviewedBy: null, reviewedAt: null, adminNote: null, rewardLedgerId: null, idempotencyKey: String(req.headers['idempotency-key'] || '').trim() || null };
@@ -2483,9 +2569,8 @@ async function digirupeeApi(req, res, path) {
     const claimsToday = db.digirupee.wheelClaims.filter(claim => claim.userId === user.id && claim.dayKey === today);
     const canSpin = !!db.digirupee.wheelConfig.enabled && claimsToday.length < Number(db.digirupee.wheelConfig.dailyClaimLimit || 1) && db.digirupee.wheelConfig.segments.some(segment => segment.enabled && Number(segment.probabilityWeight) > 0);
     const previous = claimsToday.at(-1);
-    const next = new Date();
-    next.setHours(24, 0, 0, 0);
-    return send(res, 200, { enabled: !!db.digirupee.wheelConfig.enabled, segments: db.digirupee.wheelConfig.segments.filter(segment => segment.enabled).map(segment => ({ id: segment.id, label: segment.label, rewardAmount: formatUsdtMicros(segment.rewardAmountMicros) })), canSpin, nextEligibleAt: canSpin ? null : next.getTime(), previousResult: previous ? { segmentId: previous.segmentId, label: previous.label, rewardAmount: formatUsdtMicros(previous.rewardAmountMicros), createdAt: previous.createdAt } : null });
+    const nextEligibleAt = nextIndiaMidnight();
+    return send(res, 200, { enabled: !!db.digirupee.wheelConfig.enabled, segments: db.digirupee.wheelConfig.segments.filter(segment => segment.enabled).map(segment => ({ id: segment.id, label: segment.label, rewardAmount: formatUsdtMicros(segment.rewardAmountMicros) })), canSpin, nextEligibleAt: canSpin ? null : nextEligibleAt, previousResult: previous ? { segmentId: previous.segmentId, label: previous.label, rewardAmount: formatUsdtMicros(previous.rewardAmountMicros), createdAt: previous.createdAt } : null });
   }
 
   if (req.method === 'POST' && path === '/wheel/spin') {
@@ -2650,6 +2735,7 @@ async function digirupeeApi(req, res, path) {
     const b = await body(req);
     const task = { id: `dta_${randomUUID().replace(/-/g, '').slice(0, 12)}`, campaignId: campaign.id, title: String(b.title || '').trim(), description: String(b.description || '').trim(), rewardAmountMicros: parseUsdtMicros(b.rewardAmount || b.rewardAmountUsdt || '0'), enabled: b.enabled === undefined ? true : b.enabled === true, claimType: String(b.claimType || 'AUTO').trim().toUpperCase(), requirements: b.requirements && typeof b.requirements === 'object' ? b.requirements : {}, startsAt: parseDigiDate(b.startsAt, campaign.startsAt), endsAt: parseDigiDate(b.endsAt, campaign.endsAt), maxClaimsPerUser: b.maxClaimsPerUser === undefined || b.maxClaimsPerUser === '' ? 1 : Number(b.maxClaimsPerUser) };
     if (task.title.length < 2 || task.title.length > 120 || task.description.length > 500 || task.rewardAmountMicros === null || task.rewardAmountMicros < 0 || !digiClaimTypes.has(task.claimType) || task.startsAt === null || (task.endsAt !== null && task.endsAt < task.startsAt) || !Number.isInteger(task.maxClaimsPerUser) || task.maxClaimsPerUser < 1) return send(res, 400, { error: 'Task fields are invalid' });
+    if (task.claimType === 'AUTO' && campaign.type !== 'TRADE') return send(res, 400, { error: 'AUTO tasks are supported only for TRADE campaigns; use MANUAL for other campaign types' });
     campaign.tasks = campaign.tasks || []; campaign.tasks.push(task); campaign.updatedAt = Date.now();
     appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'campaign.updated', entityType: 'task', entityId: task.id, details: { campaignId: campaign.id, title: task.title } });
     await persist();
@@ -2716,7 +2802,7 @@ async function digirupeeApi(req, res, path) {
     const admin = adminAuth(req); requireAdminRole(admin, ['owner']); const b = await body(req);
     const segments = Array.isArray(b.segments) ? b.segments.map(item => ({ id: String(item.id || '').trim().slice(0, 40), label: String(item.label || '').trim().slice(0, 80), rewardAmountMicros: parseUsdtMicros(item.rewardAmount ?? item.rewardAmountUsdt ?? '0'), probabilityWeight: Number(item.probabilityWeight), enabled: item.enabled !== false })) : null;
     const dailyClaimLimit = Number(b.dailyClaimLimit); const enabled = b.enabled === true;
-    if (!segments || segments.length < 1 || segments.length > 20 || segments.some(item => !/^[A-Za-z0-9_-]{1,40}$/.test(item.id) || !item.label || item.rewardAmountMicros === null || item.rewardAmountMicros < 0 || !Number.isSafeInteger(item.probabilityWeight) || item.probabilityWeight < 0) || new Set(segments.map(item => item.id)).size !== segments.length || !Number.isInteger(dailyClaimLimit) || dailyClaimLimit < 1 || dailyClaimLimit > 10 || (enabled && !segments.some(item => item.enabled && item.probabilityWeight > 0))) return send(res, 400, { error: 'Wheel configuration is invalid' });
+    if (!segments || segments.length !== 8 || segments.some(item => !/^[A-Za-z0-9_-]{1,40}$/.test(item.id) || !item.label || item.rewardAmountMicros === null || item.rewardAmountMicros < 0 || !Number.isSafeInteger(item.probabilityWeight) || item.probabilityWeight < 0) || new Set(segments.map(item => item.id)).size !== segments.length || !Number.isInteger(dailyClaimLimit) || dailyClaimLimit < 1 || dailyClaimLimit > 10 || (enabled && !segments.some(item => item.enabled && item.probabilityWeight > 0))) return send(res, 400, { error: 'Wheel configuration is invalid' });
     db.digirupee.wheelConfig = { enabled, dailyClaimLimit, segments, updatedAt: Date.now() };
     appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'wheel.configured', entityType: 'wheel', entityId: 'config', details: { enabled, segmentCount: segments.length } }); await persist();
     return send(res, 200, { config: db.digirupee.wheelConfig });
@@ -3332,6 +3418,28 @@ async function digirupeeApi(req, res, path) {
     return send(res, 200, { admin: { email: admin.email, role: admin.role }, requiredConfirmations: tronRequiredConfirmations, deposits });
   }
 
+  if (req.method === 'GET' && /^\/admin\/payout-methods\/[A-Za-z0-9_-]+\/reveal$/.test(path)) {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
+    const id = path.split('/').at(-2);
+    const method = db.digirupee.payoutMethods.find(item => item.id === id);
+    if (!method) return send(res, 404, { error: 'Payout method not found' });
+    appendDigiAudit({
+      actorType: 'admin',
+      actorId: admin.email,
+      action: 'payout.destination_revealed',
+      entityType: 'payout-method',
+      entityId: method.id,
+      details: { userId: method.userId, type: method.type }
+    });
+    await persist();
+    return send(res, 200, {
+      method: method.type === 'BANK'
+        ? { id: method.id, type: method.type, label: method.label, bankName: method.bankName, accountNumber: method.accountNumber, ifsc: method.ifsc, holderName: method.holderName, mobile: method.mobile }
+        : { id: method.id, type: method.type, label: method.label, upiId: method.upiId, holderName: method.holderName, mobile: method.mobile }
+    });
+  }
+
   if (req.method === 'GET' && path === '/admin/payouts') {
     const admin = adminAuth(req);
     const expired = expireDigiOrders();
@@ -3454,12 +3562,15 @@ async function api(req, res, path) {
       return send(res, 401, { error: 'Admin MFA code required' });
     }
     appendAudit({ actorType: 'admin', actorId: email, action: 'admin.login', entityType: 'session', entityId: email, details: { role: admin.role, mfa: !!admin.mfaCode } });
+    const token = makeAdminSession(admin);
     await persist();
-    return send(res, 200, { token: makeAdminSession(admin), expiresIn: adminSessionMaxAge, admin: { email: admin.email, role: admin.role, mfaEnabled: !!admin.mfaCode } });
+    return send(res, 200, { token, expiresIn: adminSessionMaxAge, admin: { email: admin.email, role: admin.role, mfaEnabled: !!admin.mfaCode } });
   }
 
   if (req.method === 'POST' && path === '/admin/logout') {
+    const token = bearer(req);
     const admin = adminAuth(req);
+    revokeAdminSession(token);
     appendAudit({ actorType: 'admin', actorId: admin.email, action: 'admin.logout', entityType: 'session', entityId: admin.email });
     await persist();
     return send(res, 200, { ok: true });
