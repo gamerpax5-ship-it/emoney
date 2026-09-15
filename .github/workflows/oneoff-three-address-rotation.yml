@@ -36,8 +36,8 @@ jobs:
             "TRON_EXPIRED_ADDRESS_REUSE_MS",
             "5 * 60 * 1000",
             "cleanExpired = order.status === 'Expired' && !order.txId",
-            "candidate.receivedUsdtMicros",
-            "do not auto-credit either order",
+            "candidate.receivedUsdtMicros, candidate.txId",
+            "do not auto-credit either",
             "expiredAddressReuseMs: tronExpiredAddressReuseMs",
             "Boot-time migration: old clean test/expired orders"
           ];
