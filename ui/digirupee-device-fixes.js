@@ -10,49 +10,55 @@
     const style = document.createElement('style');
     style.id = 'digirupee-device-layout-fix';
     style.textContent = `
-      /* Keep the app's original typography. Only protect layout from device-width differences. */
+      /* Preserve the original digiRupee typography. Only correct geometry/overflow. */
       body{overflow-x:hidden!important}
       .app,.page,.header,.nav,.card{box-sizing:border-box;max-width:100%}
       .page{width:100%;overflow-x:hidden!important}
       img,svg,canvas{max-width:100%}
 
-      .digi-home-benefits{
-        display:grid!important;
-        grid-template-columns:repeat(3,minmax(0,1fr))!important;
-        gap:6px!important;
+      /* Rewards page had overridden the app's normal 16px page gutters. */
+      #rewards.reward-v4-ready{
+        padding:0 16px calc(28px + var(--digi-safe-bottom,0px))!important;
+        box-sizing:border-box!important;
+      }
+      #rewards .reward-v4-root{
         width:100%!important;
         max-width:100%!important;
-        align-items:stretch!important;
+        gap:12px!important;
+        box-sizing:border-box!important;
       }
-      .digi-home-benefit{
-        min-width:0!important;
+
+      /* The old mascot asset contains baked-in text/cards. Hide that dirty layer and
+         keep the live hero copy/cards as the only UI content. */
+      #rewards .reward-v4-mascot{display:none!important}
+      #rewards .reward-v4-hero{
+        min-height:214px!important;
         width:100%!important;
         max-width:100%!important;
         box-sizing:border-box!important;
-        padding-left:6px!important;
-        padding-right:6px!important;
+        overflow:hidden!important;
+        background:
+          radial-gradient(circle at 83% 22%,rgba(255,205,76,.22),transparent 20%),
+          radial-gradient(circle at 80% 78%,rgba(204,46,34,.25),transparent 30%),
+          linear-gradient(135deg,#4b0b0b 0%,#260809 55%,#0c0909 100%)!important;
       }
-      .digi-home-benefit>*{min-width:0!important;max-width:100%!important}
-
-      .digi-rate-grid,.digi-portfolio-grid,.digi-quick-grid{
-        display:grid!important;
-        grid-template-columns:repeat(2,minmax(0,1fr))!important;
-        gap:8px!important;
-        width:100%!important;
-        max-width:100%!important;
+      #rewards .reward-v4-copy{max-width:60%!important}
+      #rewards .reward-v4-wallet{
+        right:14px!important;
+        bottom:14px!important;
+        width:140px!important;
+        max-width:38%!important;
+        box-sizing:border-box!important;
       }
-      .digi-rate-grid>*,.digi-portfolio-grid>*,.digi-quick-grid>*{
-        min-width:0!important;
+      #rewards .reward-v4-news,
+      #rewards .reward-v4-wheel-card,
+      #rewards .reward-v4-task,
+      #rewards .reward-v4-zone-card{
         max-width:100%!important;
         box-sizing:border-box!important;
       }
-      .digi-rate-grid b,.digi-rate-grid strong,
-      .digi-portfolio-grid b,.digi-portfolio-grid strong,
-      .digi-quick-grid b,.digi-quick-grid strong{
-        min-width:0!important;
-        max-width:100%!important;
-      }
 
+      /* Referral attribution UI only; no font-size overrides. */
       .digi-referral-applied{
         display:block!important;
         margin-top:7px;
@@ -61,68 +67,24 @@
       }
 
       @media(max-width:380px){
-        .digi-home-benefits{gap:4px!important}
-        .digi-home-benefit{padding-left:4px!important;padding-right:4px!important}
-        .digi-rate-grid,.digi-portfolio-grid,.digi-quick-grid{gap:7px!important}
+        #rewards.reward-v4-ready{padding-left:14px!important;padding-right:14px!important}
+        #rewards .reward-v4-hero{min-height:222px!important}
+        #rewards .reward-v4-copy{max-width:62%!important}
+        #rewards .reward-v4-wallet{width:132px!important;max-width:40%!important;right:10px!important;bottom:10px!important}
       }
     `;
     document.head.appendChild(style);
   }
 
-  function textElement(root, exact) {
-    if (!root) return null;
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    let node;
-    while ((node = walker.nextNode())) {
-      if (String(node.nodeValue || '').trim() === exact) return node.parentElement;
-    }
-    return null;
-  }
-
-  function compactContainer(element, root) {
-    if (!element) return null;
-    let node = element;
-    for (let i = 0; i < 4 && node && node !== root; i++, node = node.parentElement) {
-      const text = String(node.textContent || '').replace(/\s+/g, ' ').trim();
-      if ((node.tagName === 'BUTTON' || node.tagName === 'DIV' || node.tagName === 'SPAN') && text.length <= 42) return node;
-    }
-    return element;
-  }
-
-  function commonAncestor(elements, root) {
-    const clean = elements.filter(Boolean);
-    if (clean.length < 2) return null;
-    let node = clean[0].parentElement;
-    while (node && node !== root?.parentElement) {
-      if (clean.every(item => node.contains(item))) return node;
-      node = node.parentElement;
-    }
-    return null;
-  }
-
-  function markGrid(root, labels, className) {
-    const items = labels.map(label => compactContainer(textElement(root, label), root)).filter(Boolean);
-    const parent = commonAncestor(items, root);
-    if (!parent || parent === root) return;
-    parent.classList.add(className);
-    items.forEach(item => item.classList.add(`${className}-item`));
-  }
-
-  function normalizeHomeLayout() {
-    const home = document.getElementById('home');
-    if (!home) return;
-
-    const benefitItems = ['Instant payout', 'Secure trading', 'VIP rewards']
-      .map(label => compactContainer(textElement(home, label), home)).filter(Boolean);
-    const benefitParent = commonAncestor(benefitItems, home);
-    if (benefitParent && benefitParent !== home) {
-      benefitParent.classList.add('digi-home-benefits');
-      benefitItems.forEach(item => item.classList.add('digi-home-benefit'));
-    }
-
-    markGrid(home, ['UPI Rate', 'Bank Rate'], 'digi-rate-grid');
-    markGrid(home, ['Lifetime Volume', 'INR Processing', 'INR Settled', 'Reward Wallet'], 'digi-portfolio-grid');
-    markGrid(home, ['Add Method', 'Orders', 'Rewards'], 'digi-quick-grid');
+  function removeOldHomeOverrides() {
+    document.querySelectorAll('.digi-home-benefits').forEach(node => node.classList.remove('digi-home-benefits'));
+    document.querySelectorAll('.digi-home-benefit').forEach(node => node.classList.remove('digi-home-benefit'));
+    document.querySelectorAll('.digi-rate-grid').forEach(node => node.classList.remove('digi-rate-grid'));
+    document.querySelectorAll('.digi-rate-grid-item').forEach(node => node.classList.remove('digi-rate-grid-item'));
+    document.querySelectorAll('.digi-portfolio-grid').forEach(node => node.classList.remove('digi-portfolio-grid'));
+    document.querySelectorAll('.digi-portfolio-grid-item').forEach(node => node.classList.remove('digi-portfolio-grid-item'));
+    document.querySelectorAll('.digi-quick-grid').forEach(node => node.classList.remove('digi-quick-grid'));
+    document.querySelectorAll('.digi-quick-grid-item').forEach(node => node.classList.remove('digi-quick-grid-item'));
   }
 
   function pendingReferral() {
@@ -214,7 +176,7 @@
     requestAnimationFrame(() => {
       scheduled = false;
       installResponsiveLayout();
-      normalizeHomeLayout();
+      removeOldHomeOverrides();
       forceDirectReferralLink();
       ensureReferralRegister();
     });
@@ -224,9 +186,11 @@
   observer.observe(document.documentElement, { childList:true, subtree:true });
 
   installResponsiveLayout();
+  removeOldHomeOverrides();
   refresh();
   window.addEventListener('DOMContentLoaded', async () => {
     installResponsiveLayout();
+    removeOldHomeOverrides();
     await claimDeferredReferral();
     refresh();
   });
