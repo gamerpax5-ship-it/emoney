@@ -1,0 +1,47 @@
+name: Validate Rewards visual cleanup
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/oneoff-reward-visual-polish-v2.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply visual patch
+        run: node .github/scripts/reward-polish.mjs
+
+      - name: Validate
+        run: |
+          node --check ui/digirupee-rewards.js
+          node --check website/server.mjs
+          npm run prepare-assets
+          cmp -s ui/digirupee-rewards.js website/digirupee-rewards.js
+          git diff --check
+          git restore website/digirupee-app.html website/digirupee-app.js website/digirupee-qr.js website/digirupee-rewards.js website/digirupee-rewards-assets.js website/digirupee-layout-v3.js android/app/src/main/assets/offline.html 2>/dev/null || true
+          git diff --check
+          test "$(git diff --name-only)" = "ui/digirupee-rewards.js"
+
+      - name: Commit and clean up
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ui/digirupee-rewards.js
+          git rm .github/scripts/reward-polish.mjs .github/workflows/oneoff-reward-visual-polish-v2.yml
+          git commit -m 'Polish digiRupee Rewards page visuals'
+          git push origin HEAD:main
