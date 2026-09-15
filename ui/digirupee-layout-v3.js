@@ -179,6 +179,33 @@
       #profile .profile-method-copy b{font-size:12px!important}
       #profile .profile-method-copy small{font-size:11.5px!important;line-height:1.45!important;color:#b3b8c1!important}
       #profile .profile-method-copy span{font-size:11.2px!important;line-height:1.45!important;color:#9fa6b0!important}
+      /* Professional mobile typography and containment. */
+      body.digi-layout-v61 .app{font-size:14px!important}
+      body.digi-layout-v61 .page{font-size:14px!important}
+      body.digi-layout-v61 .header-copy p{font-size:14px!important;line-height:1.45!important}
+      body.digi-layout-v61 .page small,
+      body.digi-layout-v61 .page .desc,
+      body.digi-layout-v61 .page .helper,
+      body.digi-layout-v61 .page .muted,
+      body.digi-layout-v61 .page .v61muted{font-size:13px!important;line-height:1.45!important}
+      body.digi-layout-v61 .page button:not(.v61amount input),
+      body.digi-layout-v61 .page input:not(#v61Amount),
+      body.digi-layout-v61 .page select,
+      body.digi-layout-v61 .page textarea{font-size:13px!important}
+      body.digi-layout-v61 .app>.nav button>span:last-child{font-size:11.5px!important}
+      .v61stat small,.v61info small,.v61amount small,.v61meta small,.v61sum small,.v61bank small,.v61trade small,.v61routecopy small{font-size:12.5px!important;line-height:1.45!important}
+      .v61stat b,.v61info b,.v61meta b,.v61sum b,.v61bank b,.v61trade b,.v61trade strong,.v61routecopy b{font-size:13.5px!important;line-height:1.35!important}
+      .v61title small{font-size:12px!important}.v61title p{font-size:13.5px!important}.v61btn,.v61create{font-size:13px!important}
+      .v61help,.v61status,.v61pill{font-size:12px!important;line-height:1.4!important}
+      .v61box,.v61stat,.v61info>div,.v61trade,.v61bank,.v61routebox{min-width:0;overflow:hidden}
+      .v61row,.v61top,.v61amtrow,.v61routecopy,.v61addr,.v61bank>div{min-width:0}
+      .v61top{align-items:flex-start!important}.v61top>div{min-width:0;flex:1}
+      .v61top>div>small{display:block!important;margin-top:3px;overflow-wrap:anywhere;word-break:break-word}
+      .v61status{flex:0 0 auto;max-width:42%;white-space:normal;text-align:center;overflow-wrap:anywhere}
+      .v61amtrow b,.v61amtrow strong,.v61sum b,.v61meta b,.v61info b{min-width:0;overflow-wrap:anywhere;word-break:break-word}
+      .v61addr code{font-size:12px!important;line-height:1.45!important;overflow-wrap:anywhere;word-break:break-all}
+      .v61bank{grid-template-columns:minmax(0,1fr) minmax(90px,105px)}
+      .v61bank input{min-width:0}
       @media(max-width:370px){
         .v61stats{grid-template-columns:1fr 1fr}
         .v61stats .v61stat:last-child{grid-column:1/-1}
@@ -377,15 +404,47 @@
     const value = Math.max(0, Number(MODEL.amount[type] || 0));
     const minimum = minDeposit(type);
     const active = activeOrder(type);
-    const enabledCount = methods(type, true).length;
-    const canCreate = !MODEL.busy && !active && enabledCount > 0 && minimum > 0 && value >= minimum;
-    return { value, minimum, active, enabledCount, canCreate };
+    const enabled = methods(type, true);
+    const estimatedInr = value * rate(type);
+    const compatible = type === 'UPI'
+      ? enabled.filter(method => {
+          const minimumInr = Math.max(0, Number(method.minInr || 0));
+          const usableMaximum = Math.min(
+            Math.max(0, Number(method.maxInr || method.dailyLimitInr || 0)),
+            capacity(method)
+          );
+          return estimatedInr >= minimumInr && estimatedInr <= usableMaximum;
+        })
+      : enabled;
+    const availableUpiInr = type === 'UPI'
+      ? enabled.reduce((maximum, method) => Math.max(maximum, Math.min(
+          Math.max(0, Number(method.maxInr || method.dailyLimitInr || 0)),
+          capacity(method)
+        )), 0)
+      : 0;
+    const canCreate = !MODEL.busy && !active && enabled.length > 0 && minimum > 0 &&
+      value >= minimum && (type !== 'UPI' || compatible.length > 0);
+    return {
+      value,
+      minimum,
+      active,
+      enabledCount: enabled.length,
+      compatibleCount: compatible.length,
+      estimatedInr,
+      availableUpiInr,
+      canCreate
+    };
   }
 
   function amountHelp(type, state) {
     if (state.active) return 'Finish the current deposit first.';
     if (!state.enabledCount) return `Enable or add a ${type === 'UPI' ? 'UPI ID' : 'bank account'} first.`;
     if (state.value < state.minimum) return `Enter at least ${N(state.minimum)} USDT.`;
+    if (type === 'UPI' && !state.compatibleCount) {
+      return state.availableUpiInr > 0
+        ? `This amount needs ${R(state.estimatedInr)}, but available UPI capacity is ${R(state.availableUpiInr)}.`
+        : 'The enabled UPI ID has no remaining capacity today.';
+    }
     return 'TRON address and QR will appear after creation.';
   }
 
@@ -491,8 +550,15 @@
     });
 
     $('v61Max')?.addEventListener('click', () => {
-      const maximum = Number(MODEL.rates?.limits?.globalMaxUsdt || minDeposit(type));
-      MODEL.amount[type] = String(maximum);
+      const globalMaximum = Number(MODEL.rates?.limits?.globalMaxUsdt || minDeposit(type));
+      const availableInr = methods(type, true).reduce((maximum, method) => Math.max(maximum,
+        type === 'UPI'
+          ? Math.min(Math.max(0, Number(method.maxInr || method.dailyLimitInr || 0)), capacity(method))
+          : capacity(method)
+      ), 0);
+      const capacityMaximum = rate(type) > 0 && availableInr > 0 ? availableInr / rate(type) : globalMaximum;
+      const maximum = type === 'UPI' ? Math.min(globalMaximum, capacityMaximum) : globalMaximum;
+      MODEL.amount[type] = String(Math.floor(Math.max(0, maximum) * 1_000_000) / 1_000_000);
       if (input) input.value = MODEL.amount[type];
       const hidden = $('amount');
       if (hidden) hidden.value = MODEL.amount[type];

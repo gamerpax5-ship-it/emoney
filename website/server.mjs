@@ -831,6 +831,13 @@ function payoutMethodRemainingPaise(method, timestamp = Date.now()) {
   return Math.max(0, dailyLimit - dailyMethodUsagePaise(method.id, timestamp));
 }
 
+function payoutMethodPerTradeMaxPaise(method) {
+  const configuredMax = parseInrPaise(method?.maxInr) || 0;
+  if (String(method?.type || '').toUpperCase() !== 'UPI') return configuredMax;
+  const dailyLimit = parseInrPaise(method?.dailyLimitInr) || 0;
+  return Math.max(configuredMax, dailyLimit);
+}
+
 function buildPayoutMethod(raw, existing = null) {
   const merged = { ...(existing || {}), ...(raw || {}) };
   const type = String(merged.type || '').trim().toUpperCase();
@@ -855,7 +862,7 @@ function buildPayoutMethod(raw, existing = null) {
     type,
     label,
     minInr: formatInrPaise(minInr),
-    maxInr: formatInrPaise(maxInr),
+    maxInr: formatInrPaise(type === 'UPI' ? dailyLimitInr : maxInr),
     dailyLimitInr: formatInrPaise(dailyLimitInr),
     enabled: merged.enabled === undefined ? true : merged.enabled === true,
     createdAt: existing?.createdAt || Date.now(),
@@ -884,7 +891,11 @@ function buildPayoutMethod(raw, existing = null) {
 }
 
 function publicDigiPayoutMethod(method) {
-  return { ...method };
+  const result = { ...method };
+  if (String(method?.type || '').toUpperCase() === 'UPI') {
+    result.maxInr = formatInrPaise(payoutMethodPerTradeMaxPaise(method));
+  }
+  return result;
 }
 
 function decodeBase58(value) {
@@ -1196,7 +1207,7 @@ function autoSelectDigiUpi(userId, totalPaise, candidateIds = []) {
       if (method.userId !== userId || method.type !== 'UPI' || !method.enabled) return false;
       if (requested.size && !requested.has(method.id)) return false;
       const min = parseInrPaise(method.minInr) || 0;
-      const max = parseInrPaise(method.maxInr) || 0;
+      const max = payoutMethodPerTradeMaxPaise(method);
       return totalPaise >= min && totalPaise <= max && totalPaise <= payoutMethodRemainingPaise(method);
     })
     .sort((a, b) => {
@@ -1212,14 +1223,38 @@ function validateDigiPayoutSelection({ userId, payoutType, totalPaise, payoutMet
 
   if (normalizedType === 'UPI') {
     const requestedId = String(payoutMethodId || '').trim();
+    const requested = new Set((candidateIds || []).map(item => String(item).trim()).filter(Boolean));
+    const candidates = db.digirupee.payoutMethods.filter(method =>
+      method.userId === userId &&
+      method.type === 'UPI' &&
+      (!requested.size || requested.has(method.id))
+    );
     const method = requestedId
       ? findOwnedPayoutMethod(userId, requestedId)
       : autoSelectDigiUpi(userId, totalPaise, candidateIds);
-    if (!method || method.type !== 'UPI') return { error: 'No enabled UPI payout method has enough capacity' };
-    if (!method.enabled) return { error: 'Selected UPI method is disabled' };
+
+    if (requestedId && (!method || method.type !== 'UPI')) return { error: 'Selected UPI payout method was not found' };
+    if (method && !method.enabled) return { error: 'Selected UPI method is disabled' };
+    if (!method) {
+      const enabled = candidates.filter(item => item.enabled);
+      if (!enabled.length) return { error: 'Enable at least one UPI ID before creating a UPI deposit' };
+      const usableMaximum = Math.max(...enabled.map(item =>
+        Math.min(payoutMethodPerTradeMaxPaise(item), payoutMethodRemainingPaise(item))
+      ));
+      const configuredMinimum = Math.min(...enabled.map(item => parseInrPaise(item.minInr) || Number.MAX_SAFE_INTEGER));
+      if (totalPaise < configuredMinimum) {
+        return { error: `Order INR amount is below the enabled UPI minimum of ₹${formatInrPaise(configuredMinimum)}` };
+      }
+      if (totalPaise > usableMaximum) {
+        return { error: `Order INR amount exceeds available UPI capacity of ₹${formatInrPaise(usableMaximum)}` };
+      }
+      return { error: 'UPI daily payout capacity is unavailable' };
+    }
+
     const min = parseInrPaise(method.minInr) || 0;
-    const max = parseInrPaise(method.maxInr) || 0;
-    if (totalPaise < min || totalPaise > max) return { error: 'Order INR amount is outside the UPI method limits' };
+    const max = payoutMethodPerTradeMaxPaise(method);
+    if (totalPaise < min) return { error: `Order INR amount is below the UPI minimum of ₹${formatInrPaise(min)}` };
+    if (totalPaise > max) return { error: `Order INR amount exceeds the UPI limit of ₹${formatInrPaise(max)}` };
     if (totalPaise > payoutMethodRemainingPaise(method)) return { error: 'UPI daily payout capacity is unavailable' };
     return {
       payoutType: normalizedType,
@@ -3898,6 +3933,84 @@ async function digirupeeApi(req, res, path) {
       .sort((a, b) => Number(b.createdAt) - Number(a.createdAt))
       .map(order => publicDigiOrder(order, { admin: true }));
     return send(res, 200, { admin: { email: admin.email, role: admin.role }, requiredConfirmations: tronRequiredConfirmations, deposits });
+  }
+
+  if (req.method === 'POST' && /^\/admin\/orders\/[A-Za-z0-9_-]+\/deposit-confirmation$/.test(path)) {
+    const admin = adminAuth(req);
+    requireAdminRole(admin, ['owner', 'ops']);
+    const id = path.split('/').at(-2);
+    const order = db.digirupee.orders.find(item => item.id === id);
+    if (!order) return send(res, 404, { error: 'Order not found' });
+    if (['USDT Confirmed', 'INR Processing', 'Completed'].includes(order.status)) {
+      return send(res, 200, { order: publicDigiOrder(order, { admin: true }), idempotent: true });
+    }
+    if (['Failed', 'Rejected'].includes(order.status)) return send(res, 409, { error: 'This deposit belongs to a final rejected or failed order' });
+
+    const b = await body(req);
+    const suppliedTxId = String(b.txId || b.txid || b.transactionId || '').trim();
+    const requestedTxId = suppliedTxId ? normalizeDigiTxId(suppliedTxId) : '';
+    if (suppliedTxId && !requestedTxId) return send(res, 400, { error: 'Enter a valid 64-character TRON transaction hash' });
+
+    try {
+      const candidates = await loadDigiTransfers(order, requestedTxId);
+      digiMonitorState.lastSuccessfulProviderCheckAt = Date.now();
+      let changed = false;
+      let matched = false;
+      for (const rawCandidate of candidates) {
+        const candidate = await hydrateDigiTransfer(rawCandidate);
+        const assignment = assignmentForTransfer(order.depositAddressId, candidate.timestamp, candidate.receivedUsdtMicros, candidate.txId);
+        if (!assignment || assignment.orderId !== order.id) continue;
+        matched = true;
+        changed = applyDigiTransfer(order, candidate) || changed;
+      }
+
+      if (!matched) {
+        changed = markDigiProviderResult(order, 'not_found', null) || changed;
+        if (changed) await persist();
+        return send(res, 404, { error: requestedTxId ? 'That transaction does not match this deposit' : 'No matching TRON USDT deposit was found for this order' });
+      }
+
+      if (
+        order.status === 'Late Review' &&
+        order.txId &&
+        order.chainStatus === 'valid_exact' &&
+        Number(order.receivedUsdtMicros) === Number(order.usdtMicros) &&
+        Number(order.confirmations || 0) >= tronRequiredConfirmations
+      ) {
+        const decision = decideDigiReview(order, admin, {
+          decision: 'APPROVE',
+          note: 'Manually confirmed by admin after independent TRON provider verification'
+        });
+        if (decision.error) {
+          if (changed) await persist();
+          return send(res, decision.status || 409, { error: decision.error, order: publicDigiOrder(order, { admin: true }) });
+        }
+        changed = true;
+      }
+
+      if (!['USDT Confirmed', 'INR Processing', 'Completed'].includes(order.status)) {
+        if (changed) await persist();
+        const waiting = order.status === 'Confirming'
+          ? `Deposit found with ${Number(order.confirmations || 0)} of ${tronRequiredConfirmations} required confirmations`
+          : order.review?.reason || 'Deposit was found but is not safe to confirm';
+        return send(res, 409, { error: waiting, order: publicDigiOrder(order, { admin: true }) });
+      }
+
+      appendDigiAudit({
+        actorType: 'admin',
+        actorId: admin.email,
+        action: 'tx.manually_confirmed',
+        entityType: 'sell-order',
+        entityId: order.id,
+        details: { txId: order.txId, verificationSource: order.verificationSource, confirmations: order.confirmations }
+      });
+      await persist();
+      return send(res, 200, { order: publicDigiOrder(order, { admin: true }), idempotent: false });
+    } catch (error) {
+      markDigiProviderResult(order, 'provider_error', error.message || 'TRON provider unavailable');
+      await persist();
+      return send(res, error.status && error.status >= 500 ? error.status : 503, { error: 'TRON verification is temporarily unavailable; please retry' });
+    }
   }
 
   if (req.method === 'GET' && /^\/admin\/payout-methods\/[A-Za-z0-9_-]+\/reveal$/.test(path)) {

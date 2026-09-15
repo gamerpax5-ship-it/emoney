@@ -240,6 +240,7 @@ test('digiRupee cycles three TRON addresses after confirmed deposits and sends t
       })
     });
     assert.equal(method.response.status, 201);
+    assert.equal(method.payload.payoutMethod.maxInr, 5000000, 'UPI daily limit should be the usable transfer ceiling');
 
     const quote = await request('/api/digirupee/quotes', {
       method:'POST',
@@ -262,6 +263,17 @@ test('digiRupee cycles three TRON addresses after confirmed deposits and sends t
     });
     assert.equal(order.response.status, 201);
     assert.ok(pool.includes(order.payload.order.depositAddress));
+
+    if (index === 1) {
+      const manual = await request(`/api/digirupee/admin/orders/${order.payload.order.id}/deposit-confirmation`, {
+        method:'POST',
+        headers:adminHeaders,
+        body:JSON.stringify({})
+      });
+      assert.equal(manual.response.status, 200);
+      assert.equal(manual.payload.order.status, 'INR Processing');
+      assert.equal(manual.payload.order.chainStatus, 'valid_exact');
+    }
 
     const confirmed = await waitForOrder(base, token, order.payload.order.id);
     assert.equal(confirmed.chainStatus, 'valid_exact');
