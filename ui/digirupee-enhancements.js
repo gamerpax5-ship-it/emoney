@@ -40,6 +40,49 @@
   };
   const savePrefs = prefs => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch {} };
 
+  function ensureReadableTypography() {
+    if (document.getElementById('digi-readable-type')) return;
+    const style = document.createElement('style');
+    style.id = 'digi-readable-type';
+    style.textContent = `
+      html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+      body{font-size:15px!important}
+      body button,body input,body select,body textarea{font-size:14px}
+      body small{font-size:12px!important;line-height:1.45!important}
+      body .desc,body .muted{font-size:12.5px!important;line-height:1.5!important}
+      body .menu-row b,body .history-row b{font-size:14px!important;line-height:1.35!important}
+      body .menu-row small,body .history-row small{font-size:12px!important;line-height:1.45!important}
+      body .nav span,body .bottom-nav span,body [class*="nav"] small{font-size:11px!important}
+      body .digi-auth-field label{font-size:13px!important}
+      body .digi-auth-input input{font-size:16px!important}
+      body .digi-auth-switch,body .digi-auth-switch button{font-size:14px!important}
+      body .reward-v4-kicker{font-size:11px!important}
+      body .reward-v4-copy p{font-size:12.5px!important;line-height:1.55!important}
+      body .reward-v4-explore{font-size:11.5px!important}
+      body .reward-v4-wallet small{font-size:10.8px!important}
+      body .reward-v4-wallet span{font-size:10.4px!important;line-height:1.4!important}
+      body .reward-v4-news strong{font-size:11px!important}
+      body .reward-v4-news span{font-size:11px!important}
+      body .reward-v4-news em{font-size:10px!important}
+      body .reward-v4-wheel-label{font-size:10.7px!important}
+      body .reward-v4-wheel-copy p{font-size:11.3px!important}
+      body .reward-v4-spin-status small{font-size:10.3px!important}
+      body .reward-v4-section-head button{font-size:10.5px!important}
+      body .reward-v4-zone-card b{font-size:10.8px!important}
+      body .reward-v4-zone-card small{font-size:9.8px!important;line-height:1.4!important}
+      body .reward-v4-task h4{font-size:12px!important}
+      body .reward-v4-task p{font-size:10.8px!important;line-height:1.5!important}
+      body .reward-v4-task-reward{font-size:10.5px!important}
+      body .reward-v4-task button{font-size:10.5px!important}
+      @media(max-width:370px){
+        body{font-size:14.5px!important}
+        body small{font-size:11.5px!important}
+        body .menu-row b,body .history-row b{font-size:13.5px!important}
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
   function ensureLightTheme() {
     if (document.getElementById('digi-light-theme')) return;
     const style = document.createElement('style');
@@ -166,6 +209,7 @@
   };
 
   captureReferral();
+  ensureReadableTypography();
   ensureLightTheme();
   installLanguageAndThemeMenus();
 
@@ -175,6 +219,7 @@
     scheduled = true;
     requestAnimationFrame(() => {
       scheduled = false;
+      ensureReadableTypography();
       applyTheme();
       applyTranslations();
       autofillReferral();
