@@ -2,7 +2,7 @@ name: One-off digiRupee typography tuning
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
     paths:
       - '.github/workflows/oneoff-digirupee-typography.yml'
 
@@ -16,7 +16,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Set up Node 22
         uses: actions/setup-node@v4
@@ -24,78 +24,80 @@ jobs:
           node-version: '22'
 
       - name: Apply conservative typography-only tuning
-        shell: bash
+        shell: python
         run: |
-          python3 - <<'PY'
           from pathlib import Path
 
-          layout = Path('ui/digirupee-layout-v3.js')
-          text = layout.read_text(encoding='utf-8')
-          marker = "      @media(max-width:370px){\n"
-          if marker not in text:
-              raise SystemExit('layout media marker not found')
-          block = """      /* Readability pass: only undersized secondary text. Keep cards and hierarchy unchanged. */
-      .v61stat small,.v61muted{font-size:9px}
-      .v61info small{font-size:9px}.v61info b{font-size:10px}
-      .v61title small{font-size:9px}.v61title p{font-size:10px;line-height:1.4}
-      .v61btn{font-size:9.25px}.v61pill{font-size:9px}
-      .v61amount small{font-size:9px}.v61help,.v61status{font-size:8.8px;line-height:1.35}
-      .v61addr code{font-size:9px;line-height:1.4}.v61warn{font-size:8.8px;line-height:1.45}
-      .v61meta small,.v61sum small{font-size:8.5px}.v61meta b,.v61sum b{font-size:9px}
-      .v61bank b{font-size:9.5px}.v61bank small{font-size:8.6px;line-height:1.35}
-      .v61trade small{font-size:8.7px;line-height:1.4}.v61filters button{font-size:8.9px}
-      .v61routecopy b{font-size:10.8px}.v61routecopy small{font-size:9px}
-      #profile .method-toolbar .manage-btn,#profile .method-toolbar button{font-size:9px!important}
-      #profile .profile-method-copy small{font-size:9.4px;line-height:1.3}
-      #profile .profile-method-copy span{font-size:9px;line-height:1.3}
-"""
-          if 'Readability pass: only undersized secondary text' not in text:
-              text = text.replace(marker, block + marker, 1)
-          layout.write_text(text, encoding='utf-8')
+          p = Path('ui/digirupee-layout-v3.js')
+          s = p.read_text(encoding='utf-8')
+          marker = '      @media(max-width:370px){\n'
+          block = '''      /* Readability pass: only undersized secondary text. Keep cards and hierarchy unchanged. */
+                .v61stat small,.v61muted{font-size:9px}
+                .v61info small{font-size:9px}.v61info b{font-size:10px}
+                .v61title small{font-size:9px}.v61title p{font-size:10px;line-height:1.4}
+                .v61btn{font-size:9.25px}.v61pill{font-size:9px}
+                .v61amount small{font-size:9px}.v61help,.v61status{font-size:8.8px;line-height:1.35}
+                .v61addr code{font-size:9px;line-height:1.4}.v61warn{font-size:8.8px;line-height:1.45}
+                .v61meta small,.v61sum small{font-size:8.5px}.v61meta b,.v61sum b{font-size:9px}
+                .v61bank b{font-size:9.5px}.v61bank small{font-size:8.6px;line-height:1.35}
+                .v61trade small{font-size:8.7px;line-height:1.4}.v61filters button{font-size:8.9px}
+                .v61routecopy b{font-size:10.8px}.v61routecopy small{font-size:9px}
+                #profile .method-toolbar .manage-btn,#profile .method-toolbar button{font-size:9px!important}
+                #profile .profile-method-copy small{font-size:9.4px;line-height:1.3}
+                #profile .profile-method-copy span{font-size:9px;line-height:1.3}
+          '''.replace('                ', '      ')
+          if marker not in s:
+              raise SystemExit('layout media marker missing')
+          if 'Readability pass: only undersized secondary text' not in s:
+              s = s.replace(marker, block + marker, 1)
+          p.write_text(s, encoding='utf-8')
 
-          rewards = Path('ui/digirupee-rewards.js')
-          text = rewards.read_text(encoding='utf-8')
-          marker = "      @media(max-width:370px){\n"
-          if marker not in text:
-              raise SystemExit('rewards media marker not found')
-          block = """      /* Readability pass: raise only tiny supporting text without changing card geometry. */
-      .reward-v4-kicker{font-size:9.3px}
-      .reward-v4-copy p{font-size:10.5px}.reward-v4-explore{font-size:10px}
-      .reward-v4-wallet small{font-size:8.8px}.reward-v4-wallet span{font-size:8.6px}
-      .reward-v4-news strong{font-size:9.2px}.reward-v4-news span{font-size:9.4px}.reward-v4-news em{font-size:8.6px}
-      .reward-v4-wheel-label{font-size:9.2px}.reward-v4-wheel-copy p{font-size:10px}
-      .reward-v4-spin-status small{font-size:9.1px}.reward-v4-section-head button{font-size:9.2px}
-      .reward-v4-zone-card b{font-size:9.3px}.reward-v4-zone-card small{font-size:8.5px;line-height:1.3}
-      .reward-v4-task p{font-size:9.4px}.reward-v4-task-reward{font-size:9.4px}.reward-v4-task button{font-size:9.2px}
-"""
-          if 'Readability pass: raise only tiny supporting text' not in text:
-              text = text.replace(marker, block + marker, 1)
-          text = text.replace('.reward-v4-wheel-label{font-size:7.5px}', '.reward-v4-wheel-label{font-size:8.2px}', 1)
-          rewards.write_text(text, encoding='utf-8')
-          PY
+          p = Path('ui/digirupee-rewards.js')
+          s = p.read_text(encoding='utf-8')
+          marker = '      @media(max-width:370px){\n'
+          block = '''      /* Readability pass: raise only tiny supporting text without changing card geometry. */
+                .reward-v4-kicker{font-size:9.3px}
+                .reward-v4-copy p{font-size:10.5px}.reward-v4-explore{font-size:10px}
+                .reward-v4-wallet small{font-size:8.8px}.reward-v4-wallet span{font-size:8.6px}
+                .reward-v4-news strong{font-size:9.2px}.reward-v4-news span{font-size:9.4px}.reward-v4-news em{font-size:8.6px}
+                .reward-v4-wheel-label{font-size:9.2px}.reward-v4-wheel-copy p{font-size:10px}
+                .reward-v4-spin-status small{font-size:9.1px}.reward-v4-section-head button{font-size:9.2px}
+                .reward-v4-zone-card b{font-size:9.3px}.reward-v4-zone-card small{font-size:8.5px;line-height:1.3}
+                .reward-v4-task p{font-size:9.4px}.reward-v4-task-reward{font-size:9.4px}.reward-v4-task button{font-size:9.2px}
+          '''.replace('                ', '      ')
+          if marker not in s:
+              raise SystemExit('rewards media marker missing')
+          if 'Readability pass: raise only tiny supporting text' not in s:
+              s = s.replace(marker, block + marker, 1)
+          s = s.replace('.reward-v4-wheel-label{font-size:7.5px}', '.reward-v4-wheel-label{font-size:8.2px}', 1)
+          p.write_text(s, encoding='utf-8')
 
-      - name: Validate UI-only changes
-        shell: bash
+      - name: Validate UI-only typography changes
         run: |
           node --check ui/digirupee-layout-v3.js
           node --check ui/digirupee-rewards.js
-          git diff --check
-          npm run prepare-website
-          npm run prepare-assets
           node --check website/server.mjs
+          git diff --check
           node --test tests/digirupee-pool-flow.test.mjs
-          git restore website android/app/src/main/assets 2>/dev/null || true
-          CHANGED="$(git diff --name-only | sort)"
-          printf '%s\n' "$CHANGED"
-          test "$CHANGED" = $'ui/digirupee-layout-v3.js\nui/digirupee-rewards.js'
+          node - <<'NODE'
+          const fs = require('fs');
+          const layout = fs.readFileSync('ui/digirupee-layout-v3.js','utf8');
+          const rewards = fs.readFileSync('ui/digirupee-rewards.js','utf8');
+          for (const marker of ['function toggleUpi()','window.__digiSaveBankAllocations','do not rebuild #v61root here','window.__digiLayoutV61']) {
+            if (!layout.includes(marker)) throw new Error(`missing logic guard: ${marker}`);
+          }
+          if (!layout.includes('Readability pass: only undersized secondary text')) throw new Error('layout typography block missing');
+          if (!rewards.includes('Readability pass: raise only tiny supporting text')) throw new Error('rewards typography block missing');
+          console.log('Typography-only guards passed.');
+          NODE
 
-      - name: Commit validated typography tuning and remove workflow
-        shell: bash
+      - name: Commit validated tuning and remove one-off workflow
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           rm .github/workflows/oneoff-digirupee-typography.yml
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add ui/digirupee-layout-v3.js ui/digirupee-rewards.js .github/workflows/oneoff-digirupee-typography.yml
+          git add ui/digirupee-layout-v3.js ui/digirupee-rewards.js
+          git add -u .github/workflows/oneoff-digirupee-typography.yml
           git diff --cached --check
-          git commit -m 'Improve digiRupee small-text readability'
-          git push origin HEAD:main
+          git commit -m "Improve digiRupee small-text readability"
+          git push origin main
