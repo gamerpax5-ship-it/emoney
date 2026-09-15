@@ -1,8 +1,13 @@
 package com.loktron.tronpay;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -10,6 +15,7 @@ import android.os.Bundle;
 import android.view.View;
 import android.view.WindowInsets;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -21,6 +27,8 @@ import android.widget.FrameLayout;
 
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 1001;
+    private static final int NOTIFICATION_PERMISSION_REQUEST = 1002;
+    private static final String NOTIFICATION_CHANNEL = "digirupee_updates";
     private static final String LOCAL_OFFLINE_URL = "file:///android_asset/offline.html";
     private WebView webView;
     private ValueCallback<Uri[]> fileCallback;
@@ -28,7 +36,7 @@ public class MainActivity extends Activity {
     private String appUrl;
     private Uri appOrigin;
 
-    @SuppressLint("SetJavaScriptEnabled")
+    @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -38,6 +46,8 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             getWindow().setDecorFitsSystemWindows(false);
         }
+
+        createNotificationChannel();
 
         FrameLayout rootView = new FrameLayout(this);
         rootView.setBackgroundColor(Color.rgb(7, 5, 18));
@@ -79,7 +89,8 @@ public class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " digiRupee/1.0.6");
+        settings.setUserAgentString(settings.getUserAgentString() + " digiRupee/1.0.7");
+        webView.addJavascriptInterface(new DigiAndroidBridge(), "DigiAndroid");
 
         CookieManager cookieManager = CookieManager.getInstance();
         cookieManager.setAcceptCookie(true);
@@ -101,6 +112,7 @@ public class MainActivity extends Activity {
                 if (isAppOrigin(Uri.parse(url))) {
                     showingOfflinePage = false;
                     CookieManager.getInstance().flush();
+                    requestNotificationPermission();
                 }
             }
 
@@ -129,6 +141,56 @@ public class MainActivity extends Activity {
 
         if (savedInstanceState == null) loadWebApp();
         else webView.restoreState(savedInstanceState);
+    }
+
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        if (manager == null) return;
+        NotificationChannel channel = new NotificationChannel(
+                NOTIFICATION_CHANNEL,
+                "digiRupee updates",
+                NotificationManager.IMPORTANCE_HIGH
+        );
+        channel.setDescription("Trade, payout, reward and account updates");
+        manager.createNotificationChannel(channel);
+    }
+
+    private void requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST);
+        }
+    }
+
+    private void showNativeNotification(String title, String message) {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return;
+        NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (manager == null) return;
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        android.app.Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? new android.app.Notification.Builder(this, NOTIFICATION_CHANNEL)
+                : new android.app.Notification.Builder(this);
+        builder.setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle(title == null || title.isEmpty() ? "digiRupee" : title)
+                .setContentText(message == null ? "" : message)
+                .setStyle(new android.app.Notification.BigTextStyle().bigText(message == null ? "" : message))
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent);
+        manager.notify((int) (System.currentTimeMillis() & 0x7fffffff), builder.build());
+    }
+
+    private final class DigiAndroidBridge {
+        @JavascriptInterface
+        public void requestNotificationPermission() {
+            runOnUiThread(MainActivity.this::requestNotificationPermission);
+        }
+
+        @JavascriptInterface
+        public void notify(String title, String message) {
+            runOnUiThread(() -> showNativeNotification(title, message));
+        }
     }
 
     private String configuredAppUrl() {
