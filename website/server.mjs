@@ -4477,9 +4477,9 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     const requestHost = String(req.headers['x-forwarded-host'] || req.headers.host || '')
-      .split(',')[0].trim().toLowerCase().replace(/:\\d+$/, '');
+      .split(',')[0].trim().toLowerCase().replace(/:\d+$/, '');
     const isDigiRupeeHost = requestHost === 'digirupee.loktron.com';
-    const isDigiRupeeClient = /\\bdigiRupee\\/[0-9.]+/i.test(String(req.headers['user-agent'] || ''));
+    const isDigiRupeeClient = /\bdigiRupee\/[0-9.]+/i.test(String(req.headers['user-agent'] || ''));
 
     if (url.pathname === '/health' || url.pathname === '/ready') {
       const persistenceConfigured = !!(supabaseUrl && supabaseSecretKey && persistenceSecret);
