@@ -52,7 +52,7 @@ The Android client is branded **digiRupee**. It does **not** load the LOKTRON ho
 
 The hosted digiRupee app then uses `/api/digirupee/*` for its own auth, rates, payout methods, orders, rewards, referrals, support and admin operations.
 
-The default production host is currently configured through WEB_APP_URL as https://loktron.com/; override it at build time with -PwebAppUrl=<url> or DIGIRUPEE_WEB_APP_URL.
+The production Android host is `https://digirupee.loktron.com/`. The subdomain exposes only the APK download page and digiRupee admin login to normal browsers; the hosted app shell is accepted only from the digiRupee Android WebView. Override the target at build time with `-PwebAppUrl=<url>` or `DIGIRUPEE_WEB_APP_URL`.
 
 The Android Java namespace/application ID still uses the legacy technical package `com.loktron.tronpay`. Do not rename it casually because changing the application ID changes Android app identity. Product branding and product logic remain digiRupee.
 

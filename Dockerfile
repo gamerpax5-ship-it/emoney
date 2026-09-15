@@ -4,6 +4,7 @@ COPY package.json ./
 COPY website ./website
 COPY scripts ./scripts
 COPY ui ./ui
+COPY dist ./dist
 COPY android/app/src/main/assets/wtron-parts ./android/app/src/main/assets/wtron-parts
 ENV NODE_ENV=production
 ENV PORT=3000

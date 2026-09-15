@@ -4476,6 +4476,10 @@ async function api(req, res, path) {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    const requestHost = String(req.headers['x-forwarded-host'] || req.headers.host || '')
+      .split(',')[0].trim().toLowerCase().replace(/:\\d+$/, '');
+    const isDigiRupeeHost = requestHost === 'digirupee.loktron.com';
+    const isDigiRupeeClient = /\\bdigiRupee\\/[0-9.]+/i.test(String(req.headers['user-agent'] || ''));
 
     if (url.pathname === '/health' || url.pathname === '/ready') {
       const persistenceConfigured = !!(supabaseUrl && supabaseSecretKey && persistenceSecret);
@@ -4518,14 +4522,73 @@ const server = http.createServer(async (req, res) => {
     }
 
     const pathname = decodeURIComponent(url.pathname);
+    const digiStaticFiles = new Set([
+      '/digirupee-app.html',
+      '/digirupee-app.js',
+      '/digirupee-qr.js',
+      '/digirupee-rewards.js',
+      '/digirupee-rewards-assets.js',
+      '/digirupee-layout-v3.js'
+    ]);
+    const digiPageAliases = new Map([
+      ['/', 'digirupee-download.html'],
+      ['/download', 'digirupee-download.html'],
+      ['/admin', 'digirupee-admin.html'],
+      ['/admin/', 'digirupee-admin.html'],
+      ['/admin.html', 'digirupee-admin.html'],
+      ['/digirupee-admin.html', 'digirupee-admin.html']
+    ]);
+    let hostRelativePath = '';
+
+    if (isDigiRupeeHost && pathname === '/download/digirupee.apk') {
+      const candidates = [
+        join(root, '..', 'dist', 'digiRupee.apk'),
+        join(root, '..', 'dist', 'digiRupee-debug.apk')
+      ];
+      for (const candidate of candidates) {
+        try {
+          const apk = await readFile(candidate);
+          res.writeHead(200, {
+            'Content-Type': 'application/vnd.android.package-archive',
+            'Content-Disposition': 'attachment; filename="digiRupee.apk"',
+            'Content-Length': String(apk.length),
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff'
+          });
+          return res.end(apk);
+        } catch {
+          // Try the next installable build.
+        }
+      }
+      return send(res, 503, { error: 'digiRupee APK is being prepared. Please try again shortly.' });
+    }
+
+    if (isDigiRupeeHost) {
+      hostRelativePath = digiPageAliases.get(pathname) || '';
+      if (!hostRelativePath && digiStaticFiles.has(pathname) && isDigiRupeeClient) {
+        hostRelativePath = pathname.replace(/^\/+/, '');
+      }
+      if (!hostRelativePath) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+        return res.end('Not found');
+      }
+    } else if (digiStaticFiles.has(pathname) || pathname === '/digirupee-admin.html') {
+      if (pathname === '/digirupee-app.html' && isDigiRupeeClient) {
+        res.writeHead(307, { Location: 'https://digirupee.loktron.com/digirupee-app.html', 'Cache-Control': 'no-store' });
+        return res.end();
+      }
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end('Not found');
+    }
+
     if (/^(?:\/runtime-data\.json|\/\.env(?:\.|$)|\/.*(?:\.tmp|\.bak)$|\/server\.mjs$|\/persistent-start\.mjs$|\/package\.json$|\/uploads(?:\/|$)|\/apk(?:\/|$)|\/.*\.apk$)/i.test(pathname)) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
       return res.end('Not found');
     }
     const nestedAsset = pathname.indexOf('/assets/');
-    let rel = nestedAsset >= 0
+    let rel = hostRelativePath || (nestedAsset >= 0
       ? pathname.slice(nestedAsset + 1)
-      : pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+      : pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, ''));
     rel = normalize(rel);
     const protectedRelativePath = rel.replace(/\\/g, '/');
     if (/^(?:runtime-data\.json|\.env(?:\.|$)|.*(?:\.tmp|\.bak)$|server\.mjs$|persistent-start\.mjs$|package\.json$|uploads(?:\/|$)|apk(?:\/|$)|.*\.apk$)/i.test(protectedRelativePath)) {
