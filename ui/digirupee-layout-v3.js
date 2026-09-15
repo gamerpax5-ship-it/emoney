@@ -121,6 +121,20 @@
       #profile .profile-method-row .toggle{width:34px;height:20px;margin:0;flex:none}
       #profile .profile-method-row .toggle:after{width:14px;height:14px;left:3px;top:3px}
       #profile .profile-method-row .toggle.on:after{left:17px}
+      /* Readability pass: only undersized secondary text. Keep cards and hierarchy unchanged. */
+      .v61stat small,.v61muted{font-size:9px}
+      .v61info small{font-size:9px}.v61info b{font-size:10px}
+      .v61title small{font-size:9px}.v61title p{font-size:10px;line-height:1.4}
+      .v61btn{font-size:9.25px}.v61pill{font-size:9px}
+      .v61amount small{font-size:9px}.v61help,.v61status{font-size:8.8px;line-height:1.35}
+      .v61addr code{font-size:9px;line-height:1.4}.v61warn{font-size:8.8px;line-height:1.45}
+      .v61meta small,.v61sum small{font-size:8.5px}.v61meta b,.v61sum b{font-size:9px}
+      .v61bank b{font-size:9.5px}.v61bank small{font-size:8.6px;line-height:1.35}
+      .v61trade small{font-size:8.7px;line-height:1.4}.v61filters button{font-size:8.9px}
+      .v61routecopy b{font-size:10.8px}.v61routecopy small{font-size:9px}
+      #profile .method-toolbar .manage-btn,#profile .method-toolbar button{font-size:9px!important}
+      #profile .profile-method-copy small{font-size:9.4px;line-height:1.3}
+      #profile .profile-method-copy span{font-size:9px;line-height:1.3}
       @media(max-width:370px){
         .v61stats{grid-template-columns:1fr 1fr}
         .v61stats .v61stat:last-child{grid-column:1/-1}

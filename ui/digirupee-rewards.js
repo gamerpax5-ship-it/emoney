@@ -81,10 +81,19 @@
       .reward-v4-progress{height:5px;flex:1;border-radius:999px;background:#272a30;overflow:hidden}.reward-v4-progress i{display:block;height:100%;background:linear-gradient(90deg,#c68012,#ffd960)}
       .reward-v4-task button{min-width:88px;min-height:32px;border:1px solid #67531e;border-radius:9px;background:#19160d;color:#e7ca66;font-size:8.5px;font-weight:850}.reward-v4-task button:disabled{border-color:#30333a;background:#121418;color:#777c84}
       .reward-v4-empty{min-height:115px;display:grid;place-items:center;padding:18px;border:1px solid #292d35;border-radius:14px;background:#0d0f12;color:#92979f;text-align:center;font-size:9.5px;line-height:1.5}
+      /* Readability pass: raise only tiny supporting text without changing card geometry. */
+      .reward-v4-kicker{font-size:9.3px}
+      .reward-v4-copy p{font-size:10.5px}.reward-v4-explore{font-size:10px}
+      .reward-v4-wallet small{font-size:8.8px}.reward-v4-wallet span{font-size:8.6px}
+      .reward-v4-news strong{font-size:9.2px}.reward-v4-news span{font-size:9.4px}.reward-v4-news em{font-size:8.6px}
+      .reward-v4-wheel-label{font-size:9.2px}.reward-v4-wheel-copy p{font-size:10px}
+      .reward-v4-spin-status small{font-size:9.1px}.reward-v4-section-head button{font-size:9.2px}
+      .reward-v4-zone-card b{font-size:9.3px}.reward-v4-zone-card small{font-size:8.5px;line-height:1.3}
+      .reward-v4-task p{font-size:9.4px}.reward-v4-task-reward{font-size:9.4px}.reward-v4-task button{font-size:9.2px}
       @media(max-width:370px){
         .reward-v4-copy{max-width:70%}.reward-v4-copy h2{font-size:25px}.reward-v4-wallet{width:128px;padding:10px}.reward-v4-wallet b{font-size:15px}
         .reward-v4-wheel-card{grid-template-columns:165px minmax(0,1fr);gap:8px;padding:11px}.reward-v4-wheel-wrap{width:158px;height:158px}
-        .reward-v4-wheel-label{font-size:7.5px}.reward-v4-zone-grid{grid-template-columns:1fr 1fr}.reward-v4-zone-card{min-height:84px}
+        .reward-v4-wheel-label{font-size:8.2px}.reward-v4-zone-grid{grid-template-columns:1fr 1fr}.reward-v4-zone-card{min-height:84px}
       }
     `;
     document.head.appendChild(style);
