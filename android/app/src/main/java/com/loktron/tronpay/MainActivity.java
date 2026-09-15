@@ -6,6 +6,8 @@ import android.app.Activity;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -29,6 +31,7 @@ public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 1001;
     private static final int NOTIFICATION_PERMISSION_REQUEST = 1002;
     private static final String NOTIFICATION_CHANNEL = "digirupee_updates";
+    private static final String REFERRAL_MARKER = "DIGIRUPEE_REF:";
     private static final String LOCAL_OFFLINE_URL = "file:///android_asset/offline.html";
     private WebView webView;
     private ValueCallback<Uri[]> fileCallback;
@@ -43,31 +46,23 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(Color.rgb(7, 5, 18));
         getWindow().setNavigationBarColor(Color.rgb(7, 5, 18));
         getWindow().getDecorView().setSystemUiVisibility(0);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            getWindow().setDecorFitsSystemWindows(false);
-        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) getWindow().setDecorFitsSystemWindows(false);
 
         createNotificationChannel();
 
         FrameLayout rootView = new FrameLayout(this);
         rootView.setBackgroundColor(Color.rgb(7, 5, 18));
-
         webView = new WebView(this);
         webView.setBackgroundColor(Color.rgb(7, 5, 18));
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         webView.setVerticalScrollBarEnabled(false);
         webView.setHorizontalScrollBarEnabled(false);
-        rootView.addView(webView, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-        ));
+        rootView.addView(webView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         setContentView(rootView);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             rootView.setOnApplyWindowInsetsListener((view, insets) -> {
-                android.graphics.Insets bars = insets.getInsets(
-                        WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout()
-                );
+                android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
                 view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
                 return insets;
             });
@@ -89,7 +84,7 @@ public class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " digiRupee/1.0.7");
+        settings.setUserAgentString(settings.getUserAgentString() + " digiRupee/1.0.8");
         webView.addJavascriptInterface(new DigiAndroidBridge(), "DigiAndroid");
 
         CookieManager cookieManager = CookieManager.getInstance();
@@ -127,14 +122,12 @@ public class MainActivity extends Activity {
             public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (fileCallback != null) fileCallback.onReceiveValue(null);
                 fileCallback = callback;
-                Intent intent;
                 try {
-                    intent = params.createIntent();
+                    startActivityForResult(params.createIntent(), FILE_CHOOSER_REQUEST);
                 } catch (Exception error) {
                     fileCallback = null;
                     return false;
                 }
-                startActivityForResult(intent, FILE_CHOOSER_REQUEST);
                 return true;
             }
         });
@@ -147,11 +140,7 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager == null) return;
-        NotificationChannel channel = new NotificationChannel(
-                NOTIFICATION_CHANNEL,
-                "digiRupee updates",
-                NotificationManager.IMPORTANCE_HIGH
-        );
+        NotificationChannel channel = new NotificationChannel(NOTIFICATION_CHANNEL, "digiRupee updates", NotificationManager.IMPORTANCE_HIGH);
         channel.setDescription("Trade, payout, reward and account updates");
         manager.createNotificationChannel(channel);
     }
@@ -181,6 +170,24 @@ public class MainActivity extends Activity {
         manager.notify((int) (System.currentTimeMillis() & 0x7fffffff), builder.build());
     }
 
+    private String consumeReferralMarker() {
+        try {
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard == null || !clipboard.hasPrimaryClip()) return "";
+            ClipData clip = clipboard.getPrimaryClip();
+            if (clip == null || clip.getItemCount() == 0) return "";
+            CharSequence rawValue = clip.getItemAt(0).coerceToText(this);
+            String raw = rawValue == null ? "" : rawValue.toString().trim().toUpperCase();
+            if (!raw.startsWith(REFERRAL_MARKER)) return "";
+            String code = raw.substring(REFERRAL_MARKER.length()).trim();
+            if (!code.matches("DGR[A-F0-9]{10}")) return "";
+            clipboard.setPrimaryClip(ClipData.newPlainText("digiRupee", ""));
+            return code;
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
     private final class DigiAndroidBridge {
         @JavascriptInterface
         public void requestNotificationPermission() {
@@ -190,6 +197,11 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void notify(String title, String message) {
             runOnUiThread(() -> showNativeNotification(title, message));
+        }
+
+        @JavascriptInterface
+        public String consumeReferralMarker() {
+            return MainActivity.this.consumeReferralMarker();
         }
     }
 
@@ -204,9 +216,7 @@ public class MainActivity extends Activity {
             String basePath = path == null || path.isEmpty() ? "/" : path;
             return configuredUri.buildUpon().path(basePath + "digirupee-app.html").clearQuery().fragment(null).build().toString();
         }
-        if (!path.endsWith("/digirupee-app.html")) {
-            throw new IllegalStateException("Configured URL must be digiRupee app page or hosted root");
-        }
+        if (!path.endsWith("/digirupee-app.html")) throw new IllegalStateException("Configured URL must be digiRupee app page or hosted root");
         return configuredUri.toString();
     }
 
@@ -214,10 +224,7 @@ public class MainActivity extends Activity {
         if (uri == null || appOrigin == null) return false;
         int configuredPort = appOrigin.getPort() == -1 ? 443 : appOrigin.getPort();
         int requestedPort = uri.getPort() == -1 && "https".equalsIgnoreCase(uri.getScheme()) ? 443 : uri.getPort();
-        return "https".equalsIgnoreCase(uri.getScheme())
-                && appOrigin.getHost() != null
-                && appOrigin.getHost().equalsIgnoreCase(uri.getHost())
-                && configuredPort == requestedPort;
+        return "https".equalsIgnoreCase(uri.getScheme()) && appOrigin.getHost() != null && appOrigin.getHost().equalsIgnoreCase(uri.getHost()) && configuredPort == requestedPort;
     }
 
     private void openExternal(Uri uri) {
