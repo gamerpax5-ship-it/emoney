@@ -156,7 +156,17 @@ const defaultData = {
       quoteValiditySeconds: 600,
       channels: { upi: true, bank: true },
       updatedAt: Date.now(),
-      referrals: { enabled: true, inviterRewardUsdt: 10, referredRewardUsdt: 0, minimumCompletedUsdt: 0 }
+      referrals: { enabled: true, inviterRewardUsdt: 10, referredRewardUsdt: 0, minimumCompletedUsdt: 0 },
+      rewardPage: {
+        showMascot: true,
+        showCoins: true,
+        heroKicker: 'BONUS ZONE',
+        heroTitle: 'Play More.\nEarn More.',
+        heroSubtitle: 'Daily rewards, referrals and campaign tasks—powered by your real account activity.',
+        liveNewsEnabled: true,
+        liveNewsText: '',
+        zones: { newuser: true, invite: true, tasks: true, events: true }
+      }
     },
     users: [],
     payoutMethods: [],
@@ -230,6 +240,14 @@ async function loadDb() {
           referrals: {
             ...structuredClone(defaultData.digirupee.config.referrals),
             ...(((parsed.digirupee || {}).config || {}).referrals || {})
+          },
+          rewardPage: {
+            ...structuredClone(defaultData.digirupee.config.rewardPage),
+            ...(((parsed.digirupee || {}).config || {}).rewardPage || {}),
+            zones: {
+              ...structuredClone(defaultData.digirupee.config.rewardPage.zones),
+              ...((((parsed.digirupee || {}).config || {}).rewardPage || {}).zones || {})
+            }
           }
         },
         users: Array.isArray((parsed.digirupee || {}).users) ? (parsed.digirupee || {}).users : [],
@@ -2797,6 +2815,11 @@ async function digirupeeApi(req, res, path) {
     });
   }
 
+  if (req.method === 'GET' && path === '/reward-page') {
+    digirupeeAuth(req);
+    return send(res, 200, { config: structuredClone(db.digirupee.config.rewardPage) });
+  }
+
   if (req.method === 'GET' && path === '/rewards') {
     const { user } = digirupeeAuth(req);
     const entries = db.digirupee.rewardLedger.filter(entry => entry.userId === user.id).sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
@@ -3086,6 +3109,41 @@ async function digirupeeApi(req, res, path) {
       appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'task.approved', entityType: 'task-claim', entityId: claim.id, details: { reward: formatUsdtMicros(task.rewardAmountMicros) } });
     } else { createDigiNotification({ userId: claim.userId, type: 'campaign', title: 'Task claim rejected', message: `Your task claim was rejected${note ? `: ${note}` : '.'}`, entityType: 'task-claim', entityId: claim.id, sourceKey: `task-claim:${claim.id}:rejected` }); appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'task.rejected', entityType: 'task-claim', entityId: claim.id, details: { reason: note } }); }
     await persist(); return send(res, 200, { claim });
+  }
+
+  if (req.method === 'GET' && path === '/admin/reward-page') {
+    const admin = adminAuth(req);
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, config: structuredClone(db.digirupee.config.rewardPage) });
+  }
+
+  if (req.method === 'PATCH' && path === '/admin/reward-page') {
+    const admin = adminAuth(req); requireAdminRole(admin, ['owner']); const b = await body(req);
+    const current = db.digirupee.config.rewardPage || structuredClone(defaultData.digirupee.config.rewardPage);
+    const zonesIn = b.zones && typeof b.zones === 'object' ? b.zones : {};
+    const flag = (value, fallback) => typeof value === 'boolean' ? value : fallback;
+    const clean = (value, fallback, max) => {
+      const text = String(value ?? fallback ?? '').replace(/\r/g, '').trim().slice(0, max);
+      return text || String(fallback || '').slice(0, max);
+    };
+    const next = {
+      showMascot: flag(b.showMascot, current.showMascot !== false),
+      showCoins: flag(b.showCoins, current.showCoins !== false),
+      heroKicker: clean(b.heroKicker, current.heroKicker || 'BONUS ZONE', 40),
+      heroTitle: clean(b.heroTitle, current.heroTitle || 'Play More.\nEarn More.', 100),
+      heroSubtitle: clean(b.heroSubtitle, current.heroSubtitle || '', 220),
+      liveNewsEnabled: flag(b.liveNewsEnabled, current.liveNewsEnabled !== false),
+      liveNewsText: String(b.liveNewsText ?? current.liveNewsText ?? '').replace(/\s+/g, ' ').trim().slice(0, 180),
+      zones: {
+        newuser: flag(zonesIn.newuser, current.zones?.newuser !== false),
+        invite: flag(zonesIn.invite, current.zones?.invite !== false),
+        tasks: flag(zonesIn.tasks, current.zones?.tasks !== false),
+        events: flag(zonesIn.events, current.zones?.events !== false)
+      }
+    };
+    db.digirupee.config.rewardPage = next;
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'reward-page.configured', entityType: 'reward-page', entityId: 'config', details: { showMascot: next.showMascot, showCoins: next.showCoins, liveNewsEnabled: next.liveNewsEnabled, zones: next.zones } });
+    await persist();
+    return send(res, 200, { config: structuredClone(next) });
   }
 
   if (req.method === 'GET' && path === '/admin/wheel') {

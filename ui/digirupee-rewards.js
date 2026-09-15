@@ -2,12 +2,18 @@
   'use strict';
 
   const $ = id => document.getElementById(id);
+  const assets = window.__DIGIRUPEE_REWARD_ASSETS || {};
   const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({
     '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;'
   }[ch]));
   const num = value => Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 6 });
 
-  const model = { rewards:null, wheel:null, campaigns:[] };
+  const defaultRewardPage = {
+    showMascot:true, showCoins:true, heroKicker:'BONUS ZONE', heroTitle:'Play More.\nEarn More.',
+    heroSubtitle:'Daily rewards, referrals and campaign tasks—powered by your real account activity.',
+    liveNewsEnabled:true, liveNewsText:'', zones:{newuser:true,invite:true,tasks:true,events:true}
+  };
+  const model = { rewards:null, wheel:null, campaigns:[], rewardPage:{...defaultRewardPage,zones:{...defaultRewardPage.zones}} };
   let spinning = false;
   let rotation = 0;
   let showAllTasks = false;
@@ -51,7 +57,14 @@
       .reward-v4-hero:before,.reward-v4-hero:after{content:'₮';position:absolute;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle at 30% 25%,#fff0a0,#e3a323 68%,#724500);color:#7c4c00;font-weight:950;box-shadow:0 8px 18px #0005}
       .reward-v4-hero:before{width:58px;height:58px;right:24px;top:26px;font-size:26px;transform:rotate(12deg)}
       .reward-v4-hero:after{width:38px;height:38px;right:105px;bottom:27px;font-size:18px;transform:rotate(-15deg)}
-      .reward-v4-copy{position:relative;z-index:2;max-width:62%}
+      .reward-v4-mascot{position:absolute;z-index:1;top:0;right:0;width:57%;height:84%;overflow:hidden;pointer-events:none;opacity:.96;mask-image:linear-gradient(90deg,transparent 0,#000 28%,#000 100%);-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 28%,#000 100%)}
+      .reward-v4-mascot img{position:absolute;top:-54px;right:-1px;width:176%;max-width:none;height:auto;filter:saturate(1.05) contrast(1.02)}
+      .reward-v4-mascot.hidden,.reward-v4-coin.hidden{display:none!important}
+      .reward-v4-coin{position:absolute;z-index:2;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle at 32% 24%,#fff4a9 0,#f1c047 34%,#c98918 72%,#694009 100%);border:2px solid #f4cf63;color:#744606;font-weight:950;box-shadow:0 8px 18px #0008,0 0 18px #f5c84b35;pointer-events:none}
+      .reward-v4-coin.c1{width:40px;height:40px;right:12px;top:15px;font-size:17px;transform:rotate(13deg)}
+      .reward-v4-coin.c2{width:29px;height:29px;right:105px;top:27px;font-size:12px;transform:rotate(-17deg)}
+      .reward-v4-coin.c3{width:24px;height:24px;right:73px;top:91px;font-size:10px;transform:rotate(21deg)}
+      .reward-v4-copy{position:relative;z-index:3;max-width:62%}
       .reward-v4-kicker{display:inline-flex;align-items:center;min-height:25px;padding:4px 9px;border:1px solid #8f5a1d;border-radius:999px;background:#29120d;color:#f3c95a;font-size:8.5px;font-weight:900;letter-spacing:.06em}
       .reward-v4-copy h2{margin:10px 0 7px;font-size:29px;line-height:.98;letter-spacing:-1.1px;color:#fff4dc}
       .reward-v4-copy p{margin:0;color:#d8c4b4;font-size:10px;line-height:1.45}
@@ -122,7 +135,9 @@
     root.className = 'reward-v4-root';
     root.innerHTML = `
       <section class="reward-v4-hero">
-        <div class="reward-v4-copy"><span class="reward-v4-kicker">BONUS ZONE</span><h2>Play More.<br>Earn More.</h2><p>Daily rewards, referrals and campaign tasks—powered by your real account activity.</p><button class="reward-v4-explore" id="rewardV4Explore" type="button">Explore Rewards →</button></div>
+        <div class="reward-v4-mascot" id="rewardV4Mascot" aria-hidden="true"></div>
+        <span class="reward-v4-coin c1" aria-hidden="true">₮</span><span class="reward-v4-coin c2" aria-hidden="true">₮</span><span class="reward-v4-coin c3" aria-hidden="true">₮</span>
+        <div class="reward-v4-copy"><span class="reward-v4-kicker" id="rewardV4Kicker">BONUS ZONE</span><h2 id="rewardV4HeroTitle">Play More.<br>Earn More.</h2><p id="rewardV4HeroSubtitle">Daily rewards, referrals and campaign tasks—powered by your real account activity.</p><button class="reward-v4-explore" id="rewardV4Explore" type="button">Explore Rewards →</button></div>
         <button class="reward-v4-wallet" id="rewardV4Wallet" type="button"><small>My Rewards</small><b id="rewardV4Balance">0 USDT</b><span>View reward history ›</span></button>
       </section>
       <button class="reward-v4-news" id="rewardV4News" type="button"><strong><i aria-hidden="true"></i>LIVE BONUS NEWS</strong><span id="rewardV4NewsText">Loading campaigns…</span><em id="rewardV4NewsState">Waiting</em></button>
@@ -139,6 +154,16 @@
       <section class="reward-v4-tasks" id="rewardV4Tasks"><div class="reward-v4-section-head"><h3>Task Center</h3><button id="rewardV4TaskToggle" type="button">View All ›</button></div><div class="reward-v4-task-list" id="rewardV4TaskList"></div></section>
     `;
     page.appendChild(root);
+
+    const mascot = $('rewardV4Mascot');
+    if (mascot && assets.content) {
+      const image = document.createElement('img');
+      image.src = assets.content;
+      image.alt = '';
+      image.decoding = 'async';
+      image.loading = 'eager';
+      mascot.appendChild(image);
+    }
 
     $('rewardV4Wallet')?.addEventListener('click', () => window.openRewardHistory?.());
     $('rewardV4Explore')?.addEventListener('click', () => $('rewardV4Tasks')?.scrollIntoView({behavior:'smooth',block:'start'}));
@@ -174,15 +199,40 @@
     }
   }
 
+  function rewardPageConfig() {
+    const raw = model.rewardPage || {};
+    return { ...defaultRewardPage, ...raw, zones:{ ...defaultRewardPage.zones, ...(raw.zones || {}) } };
+  }
+
+  function renderPresentation() {
+    const config = rewardPageConfig();
+    if ($('rewardV4Kicker')) $('rewardV4Kicker').textContent = config.heroKicker || defaultRewardPage.heroKicker;
+    if ($('rewardV4HeroTitle')) {
+      const lines = String(config.heroTitle || defaultRewardPage.heroTitle).split(/\n+/).slice(0, 3);
+      $('rewardV4HeroTitle').innerHTML = lines.map(esc).join('<br>');
+    }
+    if ($('rewardV4HeroSubtitle')) $('rewardV4HeroSubtitle').textContent = config.heroSubtitle || defaultRewardPage.heroSubtitle;
+    const mascot = $('rewardV4Mascot');
+    if (mascot) mascot.classList.toggle('hidden', config.showMascot === false || !assets.content);
+    document.querySelectorAll('.reward-v4-coin').forEach(node => node.classList.toggle('hidden', config.showCoins === false));
+    const news = $('rewardV4News'); if (news) news.hidden = config.liveNewsEnabled === false;
+    document.querySelectorAll('.reward-v4-zone-card[data-zone]').forEach(button => {
+      const key = button.dataset.zone;
+      button.hidden = config.zones?.[key] === false;
+    });
+  }
+
   function renderBalance() {
     if ($('rewardV4Balance')) $('rewardV4Balance').textContent = `${num(model.rewards?.balance || 0)} USDT`;
   }
 
   function renderNews() {
+    const config = rewardPageConfig();
     const campaigns = currentCampaigns();
     const active = campaigns.find(campaign => campaign.active !== false && !campaign.upcoming) || campaigns[0];
-    if ($('rewardV4NewsText')) $('rewardV4NewsText').textContent = active?.title || 'No active bonus campaign';
-    if ($('rewardV4NewsState')) $('rewardV4NewsState').textContent = active ? (active.upcoming ? 'Upcoming' : 'Active') : 'Waiting';
+    const manual = String(config.liveNewsText || '').trim();
+    if ($('rewardV4NewsText')) $('rewardV4NewsText').textContent = manual || active?.title || 'No active bonus campaign';
+    if ($('rewardV4NewsState')) $('rewardV4NewsState').textContent = manual ? 'Admin' : active ? (active.upcoming ? 'Upcoming' : 'Active') : 'Waiting';
   }
 
   function renderSpin() {
@@ -227,13 +277,14 @@
   }
 
   function renderAll() {
-    renderBalance(); renderNews(); renderWheelSegments(); renderSpin(); renderTasks();
+    renderPresentation(); renderBalance(); renderNews(); renderWheelSegments(); renderSpin(); renderTasks();
   }
 
   async function refresh() {
     try {
-      const [rewards,wheel,campaigns] = await Promise.all([api('/rewards'),api('/wheel'),api('/campaigns')]);
+      const [rewards,wheel,campaigns,rewardPage] = await Promise.all([api('/rewards'),api('/wheel'),api('/campaigns'),api('/reward-page')]);
       model.rewards = rewards; model.wheel = wheel; model.campaigns = campaigns.campaigns || [];
+      model.rewardPage = rewardPage.config || model.rewardPage;
       renderAll();
     } catch (error) {
       if (!/401|session/i.test(String(error.message))) toast(error.message, true);
