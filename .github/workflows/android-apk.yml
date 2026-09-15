@@ -25,6 +25,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Test backend and digiRupee flows
+        run: npm test
+
       - name: Verify digiRupee branding and live URL config
         run: |
           test -s android/app/src/main/res/drawable-nodpi/digirupee_logo.webp
