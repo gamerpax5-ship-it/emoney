@@ -1,0 +1,60 @@
+name: One-off legacy APK web compatibility fix
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/oneoff-legacy-apk-web-compat.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply legacy APK hosted-UI compatibility
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('ui/digirupee-layout-v3.js')
+          s = p.read_text(encoding='utf-8')
+          old = "    document.body.classList.add('digi-layout-v61');\n\n    if (typeof window.__digiStateSnapshot === 'function') {"
+          new = "    document.body.classList.add('digi-layout-v61');\n\n    // digiRupee 1.0.4 and earlier can render edge-to-edge on devices where\n    // the native WebView does not reliably consume the status-bar inset.\n    // Keep the old installed APK usable by applying a hosted-UI fallback.\n    const legacyApk = /digiRupee\\/1\\.0\\.[0-4]\\b/i.test(navigator.userAgent || '');\n    document.body.classList.toggle('digi-legacy-insets', legacyApk);\n\n    if (typeof window.__digiStateSnapshot === 'function') {"
+          if s.count(old) != 1:
+              raise SystemExit(f'expected one install anchor, found {s.count(old)}')
+          s = s.replace(old, new)
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Validate source and hosted assets
+        run: |
+          node --check ui/digirupee-layout-v3.js
+          npm run prepare-assets
+          node --check website/digirupee-layout-v3.js
+          grep -F "digi-legacy-insets" ui/digirupee-layout-v3.js
+          grep -F "digiRupee\\/1\\.0\\.[0-4]" ui/digirupee-layout-v3.js
+          npm test
+
+      - name: Commit validated compatibility fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -- android/app/src/main/assets/offline.html || true
+          rm -f .github/workflows/oneoff-legacy-apk-web-compat.yml
+          git add ui/digirupee-layout-v3.js
+          git add -u .github/workflows/oneoff-legacy-apk-web-compat.yml
+          git diff --cached --check
+          git commit -m "Keep digiRupee 1.0.4 usable with hosted safe inset fallback"
+          git pull --rebase origin main
+          git push origin HEAD:main
