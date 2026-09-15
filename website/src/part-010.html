@@ -186,7 +186,7 @@ function renderCurrencies() {
   const rows = Array.isArray(app.config?.currencies) ? app.config.currencies : [];
   const live = rows.filter(x => x.status === 'live').map(x => x.code).join(', ') || 'INR';
   const soon = rows.filter(x => x.status !== 'live').map(x => x.code).join(', ') || 'more currencies';
-  if ($('currencyNotice')) $('currencyNotice').textContent = `${live} is currently live. ${soon} are marked Coming Soon.`;
+  if ($('currencyNotice')) $('currencyNotice').textContent = `Live fiat: ${live}. Coming soon: ${soon}.`;
   const grid = $('currencyGrid');
   if (!grid || !rows.length) return;
   grid.innerHTML = rows.map(c => `

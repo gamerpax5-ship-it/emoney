@@ -110,12 +110,14 @@ const defaultData = {
       note: 'Payment, wallet and UTR support is available from the dashboard.'
     },
     currencies: [
-      { code: 'INR', name: 'Indian Rupee', symbol: '₹', status: 'live', note: 'Bank transfer, IMPS, NEFT and RTGS purchase orders enabled.' },
-      { code: 'USD', name: 'US Dollar', symbol: '$', status: 'coming-soon', note: 'Additional purchase rails will appear when activated.' },
-      { code: 'EUR', name: 'Euro', symbol: '€', status: 'coming-soon', note: 'European payment options are planned for future rollout.' },
-      { code: 'GBP', name: 'British Pound', symbol: '£', status: 'coming-soon', note: 'UK banking and pricing will appear when available.' },
-      { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', status: 'coming-soon', note: 'Gulf payment rails are prepared for future rollout.' },
-      { code: 'USDT', name: 'Tether USD', symbol: '₮', status: 'coming-soon', note: 'Crypto-side purchase and settlement options will appear when activated.' }
+      { code: 'INR', name: 'Indian Rupee', symbol: '₹', status: 'live', note: 'Indian fiat rail is active.' },
+      { code: 'USD', name: 'US Dollar', symbol: '$', status: 'live', note: 'US Dollar fiat rail is active.' },
+      { code: 'BDT', name: 'Bangladeshi Taka', symbol: '৳', status: 'coming-soon', note: 'Bangladesh fiat rail is prepared for rollout.' },
+      { code: 'PKR', name: 'Pakistani Rupee', symbol: '₨', status: 'coming-soon', note: 'Pakistan fiat rail is prepared for rollout.' },
+      { code: 'EUR', name: 'Euro', symbol: '€', status: 'coming-soon', note: 'Euro payment rail is prepared for rollout.' },
+      { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', status: 'coming-soon', note: 'Chinese Yuan fiat rail is prepared for rollout.' },
+      { code: 'GBP', name: 'British Pound', symbol: '£', status: 'coming-soon', note: 'UK fiat rail is prepared for rollout.' },
+      { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', status: 'coming-soon', note: 'UAE fiat rail is prepared for rollout.' }
     ],
     bank: {
       bank: 'HDFC Bank',
@@ -190,6 +192,29 @@ const defaultData = {
 };
 
 let db = await loadDb();
+
+function ensureLoktronFiatCurrencies() {
+  const current = Array.isArray(db.config?.currencies) ? db.config.currencies : [];
+  const base = structuredClone(defaultData.config.currencies);
+  const baseCodes = new Set(base.map(item => item.code));
+  const extras = current
+    .filter(item => {
+      const code = String(item?.code || '').trim().toUpperCase();
+      return code && code !== 'USDT' && !baseCodes.has(code);
+    })
+    .slice(0, Math.max(0, 12 - base.length));
+  const next = [...base, ...extras];
+  let changed = JSON.stringify(current) !== JSON.stringify(next);
+  db.config.currencies = next;
+  for (const user of db.users) {
+    if (String(user.currency || '').toUpperCase() === 'USDT') {
+      user.currency = 'INR';
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 const adminUsers = parseAdminUsers();
 const adminConfigured = adminUsers.length > 0;
 
@@ -4058,8 +4083,15 @@ async function api(req, res, path) {
         symbol: String(item.symbol || '').trim().slice(0, 6),
         status: String(item.status || '').toLowerCase() === 'live' ? 'live' : 'coming-soon',
         note: String(item.note || '').trim().slice(0, 140)
-      })).filter(item => item.code && item.name);
-      if (!db.config.currencies.some(item => item.code === 'INR')) db.config.currencies.unshift(structuredClone(defaultData.config.currencies[0]));
+      })).filter(item => item.code && item.name && item.code !== 'USDT');
+      for (const code of ['INR', 'USD']) {
+        let row = db.config.currencies.find(item => item.code === code);
+        if (!row) {
+          row = structuredClone(defaultData.config.currencies.find(item => item.code === code));
+          db.config.currencies.unshift(row);
+        }
+        row.status = 'live';
+      }
     }
     appendAudit({
       actorType: 'admin', actorId: admin.email, action: 'config.updated', entityType: 'config', entityId: 'purchase',
@@ -4275,7 +4307,8 @@ async function api(req, res, path) {
     if (name.length < 2 || name.length > 80) return send(res, 400, { error: 'Enter a valid name' });
     user.name = name;
     user.mobile = mobile.slice(0, 30);
-    user.currency = ['INR'].includes(currency) ? currency : 'INR';
+    const liveFiatCodes = db.config.currencies.filter(item => item.status === 'live' && item.code !== 'USDT').map(item => item.code);
+    user.currency = liveFiatCodes.includes(currency) ? currency : 'INR';
     appendAudit({ actorType: 'user', actorId: user.id, action: 'profile.updated', entityType: 'user', entityId: user.id });
     await persist();
     return send(res, 200, { user: publicUser(user) });
@@ -4482,6 +4515,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+const loktronBootStateChanged = ensureLoktronFiatCurrencies();
 const digiBootStateChanged = [
   ensureDigiReferralCodes(),
   ensureDigiWheelDefaults(),
@@ -4489,7 +4523,7 @@ const digiBootStateChanged = [
   ensureDigiSecurityFields(),
   ensureDigiSessionFields()
 ].some(Boolean);
-if (digiBootStateChanged) await persist();
+if (loktronBootStateChanged || digiBootStateChanged) await persist();
 
 server.listen(port, '0.0.0.0', () => {
   console.log(`LOKTRON website listening on ${port}`);
