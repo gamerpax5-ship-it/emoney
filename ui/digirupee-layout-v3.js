@@ -135,6 +135,26 @@
       #profile .method-toolbar .manage-btn,#profile .method-toolbar button{font-size:9px!important}
       #profile .profile-method-copy small{font-size:9.4px;line-height:1.3}
       #profile .profile-method-copy span{font-size:9px;line-height:1.3}
+      /* Readability V3: lift small supporting text across Home, UPI, Bank and Profile. */
+      body.digi-layout-v61 .header-copy p{font-size:12px!important;line-height:1.4!important;color:#b3b8c1!important}
+      body.digi-layout-v61 #home small,body.digi-layout-v61 #profile small{font-size:10.5px!important;line-height:1.4!important}
+      body.digi-layout-v61 #home .card p,body.digi-layout-v61 #home .empty p,body.digi-layout-v61 #profile .empty p{font-size:11px!important;line-height:1.45!important;color:#a8adb6!important}
+      body.digi-layout-v61 #home .order-copy small,body.digi-layout-v61 #home .order-money small{font-size:10.5px!important;line-height:1.35!important}
+      body.digi-layout-v61 #home .status-pill,body.digi-layout-v61 #home .badge{font-size:9.8px!important}
+      body.digi-layout-v61 #home .desc,body.digi-layout-v61 #profile .desc,body.digi-layout-v61 #profile .muted{font-size:10.8px!important;line-height:1.4!important}
+      #v61root small{font-size:10.2px!important;line-height:1.4!important}
+      .v61stat small,.v61muted{font-size:10.2px!important}.v61stat b{font-size:11px}
+      .v61title small{font-size:10.2px!important}.v61title p{font-size:11px!important;line-height:1.45!important}
+      .v61btn{font-size:10.2px!important}.v61pill{font-size:9.8px!important}
+      .v61help,.v61status{font-size:10px!important;line-height:1.4!important}
+      .v61addr code{font-size:10px!important;line-height:1.45!important}.v61warn{font-size:10px!important;line-height:1.45!important}
+      .v61meta small,.v61sum small{font-size:9.8px!important}.v61meta b,.v61sum b{font-size:10.5px!important}
+      .v61bank b{font-size:10.5px!important}.v61bank small{font-size:10px!important;line-height:1.4!important}
+      .v61trade small{font-size:10.2px!important;line-height:1.4!important}.v61filters button{font-size:10px!important}
+      .v61routecopy b{font-size:11px!important}.v61routecopy small{font-size:10.4px!important;line-height:1.42!important}
+      #profile .method-toolbar .manage-btn,#profile .method-toolbar button{font-size:10.2px!important}
+      #profile .profile-method-copy small{font-size:10.7px!important;line-height:1.4!important}
+      #profile .profile-method-copy span{font-size:10.2px!important;line-height:1.4!important}
       @media(max-width:370px){
         .v61stats{grid-template-columns:1fr 1fr}
         .v61stats .v61stat:last-child{grid-column:1/-1}
