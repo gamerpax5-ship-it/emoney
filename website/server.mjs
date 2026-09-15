@@ -688,6 +688,10 @@ function digiOrderIsActive(order) {
   return digiActiveStatuses.has(String(order?.status || '')) && !digiFinalStatuses.has(String(order?.status || ''));
 }
 
+function digiOrderNeedsExclusiveAddress(order) {
+  return ['Awaiting Deposit', 'Detected', 'Confirming', 'Late Review'].includes(String(order?.status || ''));
+}
+
 function parseInrPaise(value) {
   const raw = String(value ?? '').trim();
   if (!/^\d+(?:\.\d{1,2})?$/.test(raw)) return null;
@@ -849,11 +853,17 @@ function publicDigiAddress(address) {
   return { ...address, safeReuseAt: address.reservedOrderId ? null : (address.reservedUntil || null) };
 }
 
-function releaseDigiAddress(order, timestamp = Date.now()) {
+function releaseDigiAddress(order, timestamp = Date.now(), { confirmed = false } = {}) {
   const address = db.digirupee.tronAddresses.find(item => item.id === order.depositAddressId);
   if (!address || address.reservedOrderId !== order.id) return false;
+  const exactConfirmed = confirmed || (
+    !!order.txId &&
+    order.chainStatus === 'valid_exact' &&
+    Number(order.receivedUsdtMicros) === Number(order.usdtMicros) &&
+    Number(order.confirmations || 0) >= tronRequiredConfirmations
+  );
   address.reservedOrderId = null;
-  const safeReuseAt = timestamp + digiAddressCooldownMs;
+  const safeReuseAt = exactConfirmed ? timestamp : timestamp + digiAddressCooldownMs;
   address.reservedUntil = safeReuseAt;
   address.updatedAt = timestamp;
   const assignment = db.digirupee.addressAssignments.find(item => item.orderId === order.id && item.addressId === address.id);
@@ -861,6 +871,16 @@ function releaseDigiAddress(order, timestamp = Date.now()) {
     assignment.releasedAt = timestamp;
     assignment.safeReuseAt = safeReuseAt;
     assignment.status = order.status;
+  }
+  if (exactConfirmed) {
+    appendDigiAudit({
+      actorType: 'system',
+      actorId: 'address-pool',
+      action: 'tron-address.released_after_confirmation',
+      entityType: 'sell-order',
+      entityId: order.id,
+      details: { addressId: address.id }
+    });
   }
   return true;
 }
@@ -1192,7 +1212,7 @@ function availableDigiAddress(timestamp = Date.now()) {
   return db.digirupee.tronAddresses
     .filter(address => address.enabled && !address.reservedOrderId && Number(address.reservedUntil || 0) <= timestamp && !db.digirupee.addressAssignments.some(assignment => assignment.addressId === address.id && (() => {
       const assignedOrder = db.digirupee.orders.find(order => order.id === assignment.orderId);
-      return assignedOrder && digiOrderIsActive(assignedOrder);
+      return assignedOrder && digiOrderNeedsExclusiveAddress(assignedOrder);
     })()))
     .sort((a, b) => Number(a.lastUsedAt || 0) - Number(b.lastUsedAt || 0))[0] || null;
 }
@@ -1552,6 +1572,7 @@ function applyDigiTransfer(order, candidate) {
     }
     if (setDigiOrderStatus(order, 'INR Processing', 'INR Processing', now)) changed = true;
     if (ensureDigiPayoutRecord(order)) changed = true;
+    if (releaseDigiAddress(order, now, { confirmed: true })) changed = true;
   } else if (order.status !== 'INR Processing' && setDigiOrderStatus(order, 'Confirming', 'Confirming', now)) {
     if (!order.review) appendDigiAudit({ actorType: 'system', actorId: 'tron-monitor', action: 'tx.confirming', entityType: 'sell-order', entityId: order.id, details: { txId: order.txId, confirmations: order.confirmations, requiredConfirmations: tronRequiredConfirmations } });
     changed = true;
@@ -1562,7 +1583,7 @@ function applyDigiTransfer(order, candidate) {
 }
 
 function monitorableDigiOrders(timestamp = Date.now()) {
-  const result = db.digirupee.orders.filter(order => digiOrderIsActive(order));
+  const result = db.digirupee.orders.filter(order => digiOrderNeedsExclusiveAddress(order));
   for (const order of db.digirupee.orders) {
     if (order.status !== 'Expired') continue;
     const assignment = db.digirupee.addressAssignments.find(item => item.orderId === order.id);
@@ -1824,6 +1845,7 @@ function decideDigiReview(order, admin, raw) {
   appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'tx.review_approved', entityType: 'sell-order', entityId: order.id, details: { txId: order.txId, confirmations: order.confirmations } });
   setDigiOrderStatus(order, 'INR Processing', 'INR Processing', now);
   ensureDigiPayoutRecord(order);
+  releaseDigiAddress(order, now, { confirmed: true });
   return { ok: true };
 }
 
