@@ -111,6 +111,15 @@
       .reward-v4-zone-card b{font-size:10.3px!important}.reward-v4-zone-card small{font-size:9.5px!important;line-height:1.35!important}
       .reward-v4-task p{font-size:10.3px!important;line-height:1.45!important}.reward-v4-task-reward{font-size:10.2px!important}.reward-v4-task button{font-size:10px!important}
       .reward-v4-empty{font-size:10.5px!important}
+      /* Readability V4: readable secondary Rewards copy. */
+      .reward-v4-kicker{font-size:10.8px!important}.reward-v4-copy p{font-size:12px!important;line-height:1.5!important}.reward-v4-explore{font-size:11.3px!important}
+      .reward-v4-wallet small{font-size:10.7px!important}.reward-v4-wallet span{font-size:10.4px!important;line-height:1.4!important}
+      .reward-v4-news strong{font-size:10.8px!important}.reward-v4-news span{font-size:10.9px!important}.reward-v4-news em{font-size:10px!important}
+      .reward-v4-wheel-label{font-size:10.2px!important}.reward-v4-wheel-copy p{font-size:11.6px!important;line-height:1.5!important;color:#b8b2aa!important}
+      .reward-v4-spin-status small{font-size:10.8px!important}.reward-v4-section-head button{font-size:10.8px!important}
+      .reward-v4-zone-card b{font-size:11.1px!important}.reward-v4-zone-card small{font-size:10.3px!important;line-height:1.4!important;color:#aab0b8!important}
+      .reward-v4-task p{font-size:11.2px!important;line-height:1.48!important;color:#adb3bc!important}.reward-v4-task-reward{font-size:10.9px!important}.reward-v4-task button{font-size:10.8px!important}
+      .reward-v4-empty{font-size:11.2px!important}
       @media(max-width:370px){
         .reward-v4-copy{max-width:70%}.reward-v4-copy h2{font-size:25px}.reward-v4-wallet{width:128px;padding:10px}.reward-v4-wallet b{font-size:15px}
         .reward-v4-wheel-card{grid-template-columns:165px minmax(0,1fr);gap:8px;padding:11px}.reward-v4-wheel-wrap{width:158px;height:158px}

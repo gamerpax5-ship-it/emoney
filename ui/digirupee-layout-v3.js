@@ -155,6 +155,28 @@
       #profile .method-toolbar .manage-btn,#profile .method-toolbar button{font-size:10.2px!important}
       #profile .profile-method-copy small{font-size:10.7px!important;line-height:1.4!important}
       #profile .profile-method-copy span{font-size:10.2px!important;line-height:1.4!important}
+      /* Readability V4: mobile-readable secondary text while preserving card hierarchy. */
+      body.digi-layout-v61 .header-copy p{font-size:12.8px!important;line-height:1.42!important;color:#b9bec7!important}
+      body.digi-layout-v61 #home small,body.digi-layout-v61 #profile small{font-size:11.7px!important;line-height:1.45!important;color:#b3b8c1!important}
+      body.digi-layout-v61 #home .card p,body.digi-layout-v61 #home .empty p,body.digi-layout-v61 #profile .empty p{font-size:12px!important;line-height:1.5!important;color:#b0b6bf!important}
+      body.digi-layout-v61 #home .order-copy small,body.digi-layout-v61 #home .order-money small{font-size:11.5px!important;line-height:1.42!important;color:#adb3bc!important}
+      body.digi-layout-v61 #home .status-pill,body.digi-layout-v61 #home .badge{font-size:10.7px!important}
+      body.digi-layout-v61 #home .desc,body.digi-layout-v61 #profile .desc,body.digi-layout-v61 #profile .muted{font-size:11.8px!important;line-height:1.48!important;color:#adb3bc!important}
+      #v61root small{font-size:11.5px!important;line-height:1.45!important}
+      .v61stat small,.v61muted{font-size:11.3px!important;color:#aeb4bd!important}.v61stat b{font-size:11.8px!important}
+      .v61info small{font-size:11.3px!important}.v61info b{font-size:11.8px!important}
+      .v61title small{font-size:11px!important}.v61title p{font-size:12.3px!important;line-height:1.5!important;color:#b1b7c0!important}
+      .v61btn{font-size:11.2px!important}.v61pill{font-size:10.8px!important}
+      .v61amount small{font-size:11.2px!important;color:#adb3bc!important}.v61help,.v61status{font-size:11.2px!important;line-height:1.45!important;color:#adb3bc!important}
+      .v61addr code{font-size:10.8px!important;line-height:1.48!important}.v61warn{font-size:11.1px!important;line-height:1.5!important}
+      .v61meta small,.v61sum small{font-size:10.8px!important}.v61meta b,.v61sum b{font-size:11.2px!important}
+      .v61bank b{font-size:11.4px!important}.v61bank small{font-size:11.1px!important;line-height:1.45!important;color:#adb3bc!important}
+      .v61trade small{font-size:11.2px!important;line-height:1.45!important;color:#adb3bc!important}.v61filters button{font-size:10.9px!important}
+      .v61routecopy b{font-size:11.8px!important}.v61routecopy small{font-size:11.4px!important;line-height:1.46!important;color:#adb3bc!important}
+      #profile .method-toolbar .manage-btn,#profile .method-toolbar button{font-size:11px!important}
+      #profile .profile-method-copy b{font-size:12px!important}
+      #profile .profile-method-copy small{font-size:11.5px!important;line-height:1.45!important;color:#b3b8c1!important}
+      #profile .profile-method-copy span{font-size:11.2px!important;line-height:1.45!important;color:#9fa6b0!important}
       @media(max-width:370px){
         .v61stats{grid-template-columns:1fr 1fr}
         .v61stats .v61stat:last-child{grid-column:1/-1}
