@@ -123,6 +123,7 @@ if (persistenceEnabled) {
   console.warn('Supabase persistence is not configured; runtime data is ephemeral.');
 }
 
+await import('../scripts/enable-permanent-rewards.mjs');
 await import('./server-runtime.mjs');
 
 if (persistenceEnabled) {
