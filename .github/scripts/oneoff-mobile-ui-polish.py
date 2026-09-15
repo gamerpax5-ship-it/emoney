@@ -1,0 +1,102 @@
+from pathlib import Path
+
+# Auth screen polish only; preserve existing auth APIs and submit logic.
+p = Path('ui/digirupee-app.js')
+s = p.read_text(encoding='utf-8')
+replacements = [
+    ('.digi-auth-stage{flex:1;display:flex;flex-direction:column;justify-content:center;padding-top:18px}', '.digi-auth-stage{flex:1;display:flex;flex-direction:column;justify-content:flex-start;padding-top:42px}'),
+    ('.digi-auth-visual{min-height:170px;position:relative;display:flex;align-items:flex-end;padding:12px 4px 6px}.digi-auth-copy{max-width:295px}', '.digi-auth-visual{min-height:190px;position:relative;display:flex;align-items:center;padding:0 4px 8px}.digi-auth-copy{max-width:60%;position:relative;z-index:3}'),
+    ('.digi-auth-copy h1{margin:12px 0 9px;font-size:34px;line-height:1.02;letter-spacing:-.045em;max-width:315px;color:#fff}', '.digi-auth-copy h1{margin:10px 0 9px;font-size:30px;line-height:1.04;letter-spacing:-.04em;max-width:250px;color:#fff}'),
+    ('.digi-auth-copy p{margin:0;color:#9ca3af;font-size:12px;line-height:1.55;max-width:320px}', '.digi-auth-copy p{margin:0;color:#aeb4bd;font-size:11.5px;line-height:1.55;max-width:245px}'),
+    ('.digi-auth-orb{position:absolute;right:5px;top:6px;width:112px;height:112px;border-radius:34px;', '.digi-auth-orb{position:absolute;right:5px;top:24px;width:104px;height:104px;border-radius:31px;'),
+    ('.digi-auth-chip.one{right:82px;top:102px}.digi-auth-chip.two{right:8px;top:132px}', '.digi-auth-chip.one{right:58px;top:128px}.digi-auth-chip.two{right:4px;top:158px}'),
+    ('.digi-auth-card{margin-top:10px;', '.digi-auth-card{margin-top:4px;'),
+    ('.digi-auth-brand small{display:block;color:#7f8794;font-size:10px;margin-top:2px}', '.digi-auth-brand small{display:block;color:#979ea8;font-size:10.8px;margin-top:2px}'),
+    ('.digi-auth-secure{display:flex;align-items:center;gap:7px;color:#aab0ba;font-size:10px;', '.digi-auth-secure{display:flex;align-items:center;gap:7px;color:#b4bac3;font-size:10.5px;'),
+    ('.digi-auth-form-title h2{margin:0;font-size:18px;letter-spacing:-.02em}', '.digi-auth-form-title h2{margin:0;font-size:20px;letter-spacing:-.02em}'),
+    ('.digi-auth-form-title p{margin:4px 0 0;color:#858d99;font-size:10px;line-height:1.45}', '.digi-auth-form-title p{margin:5px 0 0;color:#a0a6b0;font-size:11px;line-height:1.45}'),
+    ('.digi-auth-badge{padding:7px 9px;border-radius:999px;background:#1a1d24;color:#cfd3da;font-size:9px;', '.digi-auth-badge{padding:7px 9px;border-radius:999px;background:#1a1d24;color:#d7dbe1;font-size:9.5px;'),
+    ('.digi-auth-field label{color:#a9b0bb;font-size:10px;font-weight:700;', '.digi-auth-field label{color:#c2c7cf;font-size:11px;font-weight:700;'),
+    ('.digi-auth-input-shell input{width:100%;height:47px;border:0;outline:0;background:transparent;color:#fff;padding:0 12px 0 0;font-size:13px}', '.digi-auth-input-shell input{width:100%;height:47px;border:0;outline:0;background:transparent;color:#fff;padding:0 12px 0 0;font-size:14px}'),
+    ('.digi-auth-input-shell input::placeholder{color:#5f6671}', '.digi-auth-input-shell input::placeholder{color:#7a818d}'),
+    ('.digi-auth-password-btn{border:0;background:transparent;color:#8f97a3;padding:0 12px;font-size:10px}', '.digi-auth-password-btn{border:0;background:transparent;color:#b3bac4;padding:0 12px;font-size:11px}'),
+    ('.digi-auth .error{min-height:17px;color:#ff7784;font-size:10px;margin-top:8px}', '.digi-auth .error{min-height:17px;color:#ff8d99;font-size:10.5px;margin-top:8px}.digi-auth .error:empty{display:none}'),
+    ('.digi-auth-primary{margin-top:3px;', '.digi-auth-primary{margin-top:13px;'),
+    ('.digi-auth-register-link{margin-top:15px;display:flex;align-items:center;justify-content:center;gap:6px;color:#7f8794;font-size:10px}', '.digi-auth-register-link{margin-top:15px;display:flex;align-items:center;justify-content:center;gap:6px;color:#979ea8;font-size:11px}'),
+    ('.digi-auth-register-link button,.digi-auth-back{border:0;background:transparent;color:#f1cf67;font-weight:800;padding:2px 0;font-size:10px}', '.digi-auth-register-link button,.digi-auth-back{border:0;background:transparent;color:#f1cf67;font-weight:800;padding:2px 0;font-size:11px}'),
+    ('.digi-auth-terms{color:#656d79;font-size:9px;', '.digi-auth-terms{color:#8e96a1;font-size:10px;'),
+    ('.digi-auth-foot{margin:15px 0 0;display:flex;justify-content:center;align-items:center;gap:6px;color:#6f7682;font-size:9px}', '.digi-auth-foot{margin:14px 0 0;display:flex;justify-content:center;align-items:center;gap:6px;color:#8d949e;font-size:10px}')
+]
+for old, new in replacements:
+    if old not in s:
+        raise SystemExit(f'auth target missing: {old[:72]}')
+    s = s.replace(old, new, 1)
+protected = "${register ? '' : '<div class=\"digi-auth-meta\">Protected session on this device</div>'}"
+if protected not in s:
+    raise SystemExit('protected-session helper target missing')
+s = s.replace(protected, '', 1)
+old_catch = """    } catch (error) {
+      document.body.classList.add('digi-ready');
+      const auth = $('digiAuth'); if (auth) auth.hidden = false;
+      const expectedAuthFailure = /401|auth|sign in|session/i.test(String(error.message || ''));
+      renderAuth('login', expectedAuthFailure ? '' : 'Could not restore your session. Please sign in.');
+    }
+"""
+new_catch = """    } catch (error) {
+      document.body.classList.add('digi-ready');
+      const auth = $('digiAuth'); if (auth) auth.hidden = false;
+      // A fresh install has no session. Show a clean login screen; real login errors still surface on submit.
+      renderAuth('login');
+    }
+"""
+if old_catch not in s:
+    raise SystemExit('initial auth catch target missing')
+s = s.replace(old_catch, new_catch, 1)
+p.write_text(s, encoding='utf-8')
+
+p = Path('ui/digirupee-layout-v3.js')
+s = p.read_text(encoding='utf-8')
+marker = "      @media(max-width:370px){\n        .v61stats"
+block = """      /* Readability V3: lift small supporting text across Home, UPI, Bank and Profile. */
+      body.digi-layout-v61 .header-copy p{font-size:12px!important;line-height:1.4!important;color:#b3b8c1!important}
+      body.digi-layout-v61 #home small,body.digi-layout-v61 #profile small{font-size:10.5px!important;line-height:1.4!important}
+      body.digi-layout-v61 #home .card p,body.digi-layout-v61 #home .empty p,body.digi-layout-v61 #profile .empty p{font-size:11px!important;line-height:1.45!important;color:#a8adb6!important}
+      body.digi-layout-v61 #home .order-copy small,body.digi-layout-v61 #home .order-money small{font-size:10.5px!important;line-height:1.35!important}
+      body.digi-layout-v61 #home .status-pill,body.digi-layout-v61 #home .badge{font-size:9.8px!important}
+      body.digi-layout-v61 #home .desc,body.digi-layout-v61 #profile .desc,body.digi-layout-v61 #profile .muted{font-size:10.8px!important;line-height:1.4!important}
+      #v61root small{font-size:10.2px!important;line-height:1.4!important}
+      .v61stat small,.v61muted{font-size:10.2px!important}.v61stat b{font-size:11px}
+      .v61title small{font-size:10.2px!important}.v61title p{font-size:11px!important;line-height:1.45!important}
+      .v61btn{font-size:10.2px!important}.v61pill{font-size:9.8px!important}
+      .v61help,.v61status{font-size:10px!important;line-height:1.4!important}
+      .v61addr code{font-size:10px!important;line-height:1.45!important}.v61warn{font-size:10px!important;line-height:1.45!important}
+      .v61meta small,.v61sum small{font-size:9.8px!important}.v61meta b,.v61sum b{font-size:10.5px!important}
+      .v61bank b{font-size:10.5px!important}.v61bank small{font-size:10px!important;line-height:1.4!important}
+      .v61trade small{font-size:10.2px!important;line-height:1.4!important}.v61filters button{font-size:10px!important}
+      .v61routecopy b{font-size:11px!important}.v61routecopy small{font-size:10.4px!important;line-height:1.42!important}
+      #profile .method-toolbar .manage-btn,#profile .method-toolbar button{font-size:10.2px!important}
+      #profile .profile-method-copy small{font-size:10.7px!important;line-height:1.4!important}
+      #profile .profile-method-copy span{font-size:10.2px!important;line-height:1.4!important}
+"""
+if marker not in s:
+    raise SystemExit('layout typography marker missing')
+s = s.replace(marker, block + marker, 1)
+p.write_text(s, encoding='utf-8')
+
+p = Path('ui/digirupee-rewards.js')
+s = p.read_text(encoding='utf-8')
+marker = "      @media(max-width:370px){\n        .reward-v4-copy"
+block = """      /* Readability V3: supporting reward copy only; keep hierarchy and card geometry. */
+      .reward-v4-kicker{font-size:10px!important}.reward-v4-copy p{font-size:11.3px!important;line-height:1.5!important}.reward-v4-explore{font-size:10.5px!important}
+      .reward-v4-wallet small{font-size:9.7px!important}.reward-v4-wallet span{font-size:9.4px!important;line-height:1.35!important}
+      .reward-v4-news strong{font-size:10px!important}.reward-v4-news span{font-size:10.1px!important}.reward-v4-news em{font-size:9.4px!important}
+      .reward-v4-wheel-label{font-size:9.7px!important}.reward-v4-wheel-copy p{font-size:10.8px!important;line-height:1.5!important}
+      .reward-v4-spin-status small{font-size:10px!important}.reward-v4-section-head button{font-size:10px!important}
+      .reward-v4-zone-card b{font-size:10.3px!important}.reward-v4-zone-card small{font-size:9.5px!important;line-height:1.35!important}
+      .reward-v4-task p{font-size:10.3px!important;line-height:1.45!important}.reward-v4-task-reward{font-size:10.2px!important}.reward-v4-task button{font-size:10px!important}
+      .reward-v4-empty{font-size:10.5px!important}
+"""
+if marker not in s:
+    raise SystemExit('rewards typography marker missing')
+s = s.replace(marker, block + marker, 1)
+p.write_text(s, encoding='utf-8')
