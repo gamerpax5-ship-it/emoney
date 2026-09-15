@@ -127,7 +127,13 @@ await import('./server.mjs');
 
 if (persistenceEnabled) {
   if (String(process.env.AUDIT_REPAIR_ON_BOOT || '').toLowerCase() === 'true') {
-    await persistState();
+    try {
+      await persistState();
+    } catch (error) {
+      // A remote persistence outage or an unapplied migration must not take the
+      // web/API process down after it has already started successfully.
+      console.error('Initial persistence sync failed:', error.message);
+    }
   }
   fsWatchFile(dataFile, { interval: 500 }, queueStateSync);
   try {
