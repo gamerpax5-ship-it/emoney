@@ -59,7 +59,8 @@
     const prefs = readPrefs();
     document.body.classList.toggle('digi-light', prefs.theme === 'light');
     const state = document.getElementById('themeState');
-    if (state) state.textContent = `${prefs.theme === 'light' ? 'Light' : prefs.theme === 'pure' ? 'Pure Black & Gold' : 'Midnight Red & Gold'} ›`;
+    const value = `${prefs.theme === 'light' ? 'Light' : prefs.theme === 'pure' ? 'Pure Black & Gold' : 'Midnight Red & Gold'} ›`;
+    if (state && state.textContent !== value) state.textContent = value;
   }
 
   function applyTranslations() {
@@ -75,12 +76,12 @@
       const original = String(node.__digiOriginalText || '');
       const key = original.trim();
       if (!key) continue;
-      const translated = table[key];
-      if (prefs.language === 'en') node.nodeValue = original;
-      else if (translated) node.nodeValue = original.replace(key, translated);
+      const translated = prefs.language === 'en' ? original : (table[key] ? original.replace(key, table[key]) : node.nodeValue);
+      if (node.nodeValue !== translated) node.nodeValue = translated;
     }
     const langState = document.getElementById('langState');
-    if (langState) langState.textContent = `${LANGUAGES[prefs.language]} ›`;
+    const value = `${LANGUAGES[prefs.language]} ›`;
+    if (langState && langState.textContent !== value) langState.textContent = value;
   }
 
   function installLanguageAndThemeMenus() {
@@ -123,7 +124,7 @@
     const input = document.getElementById('digiReferral');
     const ref = localStorage.getItem(REF_KEY) || '';
     if (input && ref) {
-      input.value = ref;
+      if (input.value !== ref) input.value = ref;
       input.readOnly = true;
       const field = input.closest('.digi-auth-field');
       if (field) field.style.display = 'none';
@@ -137,36 +138,55 @@
     let code = '';
     try { code = new URL(raw, location.origin).searchParams.get('ref') || ''; } catch {}
     if (!code && /^[A-Za-z0-9_-]{3,30}$/.test(raw)) code = raw;
-    if (code) refInput.value = `https://digirupee.loktron.com/digiRupee.apk?ref=${encodeURIComponent(code)}`;
+    if (code) {
+      const value = `https://digirupee.loktron.com/download/digirupee.apk?ref=${encodeURIComponent(code)}`;
+      if (refInput.value !== value) refInput.value = value;
+    }
   }
 
-  let seenNotifications = new Set();
-  function surfaceNativeNotifications() {
-    const state = window.__digiStateSnapshot?.();
-    const items = state?.notifications || [];
-    const permissionAllowed = state?.profile?.notificationPreference !== false;
-    if (!permissionAllowed || !window.DigiAndroid?.notify) return;
-    items.filter(item => !item.readAt && !seenNotifications.has(item.id)).slice(0,3).forEach(item => {
+  const seenNotifications = new Set();
+  function surfaceItems(items) {
+    if (!window.DigiAndroid?.notify || !Array.isArray(items)) return;
+    items.filter(item => !item.readAt && item.id && !seenNotifications.has(item.id)).slice(0,3).forEach(item => {
       seenNotifications.add(item.id);
       try { window.DigiAndroid.notify(String(item.title || 'digiRupee'), String(item.message || '')); } catch {}
     });
   }
 
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const response = await nativeFetch(...args);
+    try {
+      const target = String(args[0]?.url || args[0] || '');
+      if (target.includes('/api/digirupee/notifications?')) {
+        response.clone().json().then(payload => surfaceItems(payload?.notifications || [])).catch(() => {});
+      }
+    } catch {}
+    return response;
+  };
+
   captureReferral();
   ensureLightTheme();
   installLanguageAndThemeMenus();
 
-  const observer = new MutationObserver(() => {
-    applyTheme();
-    applyTranslations();
-    autofillReferral();
-    makeReferralDownloadLink();
-    surfaceNativeNotifications();
-  });
+  let scheduled = false;
+  const refreshUiEnhancements = () => {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      applyTheme();
+      applyTranslations();
+      autofillReferral();
+      makeReferralDownloadLink();
+    });
+  };
+
+  const observer = new MutationObserver(refreshUiEnhancements);
   observer.observe(document.documentElement, { childList:true, subtree:true });
 
   window.addEventListener('DOMContentLoaded', () => {
-    applyTheme(); applyTranslations(); autofillReferral(); makeReferralDownloadLink();
+    refreshUiEnhancements();
     try { window.DigiAndroid?.requestNotificationPermission?.(); } catch {}
   });
 })();
