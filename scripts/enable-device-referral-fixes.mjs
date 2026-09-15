@@ -18,9 +18,13 @@ if (!html.includes('/digirupee-device-fixes.js')) {
 
 let runtime = await readFile(runtimePath, 'utf8');
 if (!runtime.includes("'/digirupee-device-fixes.js'")) {
-  const pattern = /('[/]digirupee-enhancements[.]js')(\s*\n\s*\]\);)/;
-  if (!pattern.test(runtime)) throw new Error('digiRupee static allowlist hook was not found');
-  runtime = runtime.replace(pattern, "$1,\n      '/digirupee-device-fixes.js'$2");
+  const start = runtime.indexOf('const digiStaticFiles = new Set([');
+  if (start < 0) throw new Error('digiRupee static allowlist start was not found');
+  const end = runtime.indexOf(']);', start);
+  if (end < 0) throw new Error('digiRupee static allowlist end was not found');
+  const block = runtime.slice(start, end);
+  const comma = /,\s*$/.test(block) ? '' : ',';
+  runtime = runtime.slice(0, end) + `${comma}\n      '/digirupee-device-fixes.js'\n    ` + runtime.slice(end);
   await writeFile(runtimePath, runtime, 'utf8');
 }
 
