@@ -113,19 +113,20 @@ String.raw`function assignmentForTransfer(addressId, timestamp) {
     .filter(item => item.addressId === addressId && Number(item.assignedAt) <= at && at <= Number(item.quoteExpiresAt) + tronLateDepositGraceMs)
     .sort((a, b) => Number(b.assignedAt) - Number(a.assignedAt))[0] || null;
 }`,
-String.raw`function assignmentForTransfer(addressId, timestamp, receivedUsdtMicros = null) {
+String.raw`function assignmentForTransfer(addressId, timestamp, receivedUsdtMicros = null, candidateTxId = '') {
   const at = Number(timestamp);
   if (!Number.isFinite(at) || at <= 0) return null;
+  const txId = normalizeDigiTxId(candidateTxId);
   const matches = db.digirupee.addressAssignments
     .filter(item => item.addressId === addressId && Number(item.assignedAt) <= at && at <= Number(item.quoteExpiresAt) + tronLateDepositGraceMs)
     .map(assignment => ({ assignment, order: db.digirupee.orders.find(order => order.id === assignment.orderId) }))
-    .filter(item => item.order)
+    .filter(item => item.order && (!item.order.txId || normalizeDigiTxId(item.order.txId) === txId))
     .sort((a, b) => Number(b.assignment.assignedAt) - Number(a.assignment.assignedAt));
   if (!matches.length) return null;
 
-  // Reused addresses can have overlapping late-deposit windows. Prefer a unique
-  // exact-amount assignment; if two historical orders are indistinguishable,
-  // do not auto-credit either order.
+  // Reused addresses can have overlapping late-deposit windows. Completed tx-bound
+  // assignments are excluded above. Prefer a unique exact-amount assignment; if
+  // two unclaimed historical orders are indistinguishable, do not auto-credit either.
   const received = Number(receivedUsdtMicros);
   if (Number.isSafeInteger(received) && received >= 0) {
     const exact = matches.filter(item => Number(item.order.usdtMicros) === received);
@@ -146,7 +147,7 @@ String.raw`function assignmentForTransfer(addressId, timestamp, receivedUsdtMicr
 const call = 'const assignment = assignmentForTransfer(order.depositAddressId, candidate.timestamp);';
 const callCount = source.split(call).length - 1;
 if (callCount !== 2) throw new Error(`assignment call sites: expected 2, found ${callCount}`);
-source = source.replaceAll(call, 'const assignment = assignmentForTransfer(order.depositAddressId, candidate.timestamp, candidate.receivedUsdtMicros);');
+source = source.replaceAll(call, 'const assignment = assignmentForTransfer(order.depositAddressId, candidate.timestamp, candidate.receivedUsdtMicros, candidate.txId);');
 
 replaceOne(
   "        addressReuseCooldownMs: tronAddressReuseCooldownMs,\n        apiKeyConfigured: !!tronApiKey",
