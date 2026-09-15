@@ -4397,7 +4397,13 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-if (ensureDigiReferralCodes() || ensureDigiAddressAssignments() || ensureDigiSecurityFields() || ensureDigiSessionFields()) await persist();
+const digiBootStateChanged = [
+  ensureDigiReferralCodes(),
+  ensureDigiAddressAssignments(),
+  ensureDigiSecurityFields(),
+  ensureDigiSessionFields()
+].some(Boolean);
+if (digiBootStateChanged) await persist();
 
 server.listen(port, '0.0.0.0', () => {
   console.log(`LOKTRON website listening on ${port}`);
