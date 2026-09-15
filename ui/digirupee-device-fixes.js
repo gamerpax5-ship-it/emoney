@@ -5,42 +5,65 @@
   const validReferral = value => /^DGR[A-F0-9]{10}$/.test(String(value || '').trim().toUpperCase());
   const normalizeReferral = value => String(value || '').trim().toUpperCase();
 
-  function installDigiFont() {
-    if (!document.getElementById('digirupee-inter-font')) {
-      const preconnect = document.createElement('link');
-      preconnect.id = 'digirupee-inter-font';
-      preconnect.rel = 'preconnect';
-      preconnect.href = 'https://fonts.googleapis.com';
-      document.head.appendChild(preconnect);
-
-      const font = document.createElement('link');
-      font.rel = 'stylesheet';
-      font.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap';
-      document.head.appendChild(font);
-    }
-
+  function installResponsiveLayout() {
     if (document.getElementById('digirupee-device-layout-fix')) return;
     const style = document.createElement('style');
     style.id = 'digirupee-device-layout-fix';
     style.textContent = `
-      html{font-size:16px!important;-webkit-text-size-adjust:100%!important;text-size-adjust:100%!important}
-      html,body,.app,button,input,select,textarea{font-family:"Inter","Roboto",Arial,sans-serif!important;font-synthesis:none!important}
-      body{overflow-x:hidden!important;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+      /* Keep the app's original typography. Only protect layout from device-width differences. */
+      body{overflow-x:hidden!important}
       .app,.page,.header,.nav,.card{box-sizing:border-box;max-width:100%}
       .page{width:100%;overflow-x:hidden!important}
       img,svg,canvas{max-width:100%}
-      .digi-home-benefits{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:6px!important;width:100%!important;max-width:100%!important;overflow:hidden!important;align-items:stretch!important}
-      .digi-home-benefit{min-width:0!important;width:100%!important;max-width:100%!important;box-sizing:border-box!important;padding-left:7px!important;padding-right:7px!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;font-size:clamp(9.8px,2.85vw,12px)!important;line-height:1.15!important}
-      .digi-home-benefit *{min-width:0!important;font-size:inherit!important;white-space:nowrap!important}
-      .digi-home-heading{font-size:clamp(30px,8.1vw,39px)!important;line-height:.98!important;letter-spacing:-.035em!important;max-width:64%!important}
-      .digi-rate-grid,.digi-portfolio-grid,.digi-quick-grid{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important;width:100%!important;max-width:100%!important}
-      .digi-rate-grid>*,.digi-portfolio-grid>*,.digi-quick-grid>*{min-width:0!important;max-width:100%!important;box-sizing:border-box!important}
-      .digi-rate-grid b,.digi-rate-grid strong,.digi-portfolio-grid b,.digi-portfolio-grid strong,.digi-quick-grid b,.digi-quick-grid strong{min-width:0;overflow:hidden;text-overflow:ellipsis}
-      .digi-referral-applied{display:block!important;margin-top:7px;color:#69d7a9!important;font-size:11px!important;font-weight:750!important;line-height:1.35!important}
+
+      .digi-home-benefits{
+        display:grid!important;
+        grid-template-columns:repeat(3,minmax(0,1fr))!important;
+        gap:6px!important;
+        width:100%!important;
+        max-width:100%!important;
+        align-items:stretch!important;
+      }
+      .digi-home-benefit{
+        min-width:0!important;
+        width:100%!important;
+        max-width:100%!important;
+        box-sizing:border-box!important;
+        padding-left:6px!important;
+        padding-right:6px!important;
+      }
+      .digi-home-benefit>*{min-width:0!important;max-width:100%!important}
+
+      .digi-rate-grid,.digi-portfolio-grid,.digi-quick-grid{
+        display:grid!important;
+        grid-template-columns:repeat(2,minmax(0,1fr))!important;
+        gap:8px!important;
+        width:100%!important;
+        max-width:100%!important;
+      }
+      .digi-rate-grid>*,.digi-portfolio-grid>*,.digi-quick-grid>*{
+        min-width:0!important;
+        max-width:100%!important;
+        box-sizing:border-box!important;
+      }
+      .digi-rate-grid b,.digi-rate-grid strong,
+      .digi-portfolio-grid b,.digi-portfolio-grid strong,
+      .digi-quick-grid b,.digi-quick-grid strong{
+        min-width:0!important;
+        max-width:100%!important;
+      }
+
+      .digi-referral-applied{
+        display:block!important;
+        margin-top:7px;
+        color:#69d7a9!important;
+        font-weight:750!important;
+      }
+
       @media(max-width:380px){
         .digi-home-benefits{gap:4px!important}
-        .digi-home-benefit{padding-left:5px!important;padding-right:5px!important;font-size:9.5px!important}
-        .digi-home-heading{font-size:clamp(28px,8vw,35px)!important}
+        .digi-home-benefit{padding-left:4px!important;padding-right:4px!important}
+        .digi-rate-grid,.digi-portfolio-grid,.digi-quick-grid{gap:7px!important}
       }
     `;
     document.head.appendChild(style);
@@ -97,7 +120,6 @@
       benefitItems.forEach(item => item.classList.add('digi-home-benefit'));
     }
 
-    ['SELL USDT,', 'GET INR'].forEach(label => textElement(home, label)?.classList.add('digi-home-heading'));
     markGrid(home, ['UPI Rate', 'Bank Rate'], 'digi-rate-grid');
     markGrid(home, ['Lifetime Volume', 'INR Processing', 'INR Settled', 'Reward Wallet'], 'digi-portfolio-grid');
     markGrid(home, ['Add Method', 'Orders', 'Rewards'], 'digi-quick-grid');
@@ -191,7 +213,7 @@
     scheduled = true;
     requestAnimationFrame(() => {
       scheduled = false;
-      installDigiFont();
+      installResponsiveLayout();
       normalizeHomeLayout();
       forceDirectReferralLink();
       ensureReferralRegister();
@@ -201,10 +223,10 @@
   const observer = new MutationObserver(refresh);
   observer.observe(document.documentElement, { childList:true, subtree:true });
 
-  installDigiFont();
+  installResponsiveLayout();
   refresh();
   window.addEventListener('DOMContentLoaded', async () => {
-    installDigiFont();
+    installResponsiveLayout();
     await claimDeferredReferral();
     refresh();
   });
