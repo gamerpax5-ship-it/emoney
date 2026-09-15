@@ -240,13 +240,7 @@
     if (!usdtAmount) throw new Error('Enter a valid USDT amount');
     const enabled = state.methods.filter(method => method.type === state.type && method.enabled);
     if (!enabled.length) throw new Error(`Enable at least one ${state.type === 'UPI' ? 'UPI ID' : 'bank account'} first`);
-    const payload = { payoutType:state.type, usdtAmount, payoutMethodIds:enabled.map(method => method.id) };
-    if (state.type === 'BANK') {
-      const allocations = typeof window.__digiGetBankAllocations === 'function' ? window.__digiGetBankAllocations() : [];
-      if (!allocations.length) throw new Error('Allocate the full INR payout across your enabled bank accounts');
-      payload.allocations = allocations;
-    }
-    const result = await api('/quotes', { method:'POST', body:JSON.stringify(payload) });
+    const result = await api('/quotes', { method:'POST', body:JSON.stringify({ payoutType:state.type, usdtAmount, payoutMethodIds:enabled.map(method => method.id) }) });
     state.quote = result.quote;
     renderSell();
     syncQuoteControls();
@@ -255,15 +249,19 @@
   }
   async function createOrderFromQuote() {
     if (!state.quote?.quoteId) throw new Error('Quote is unavailable');
-    const orderBody = { quoteId:state.quote.quoteId };
-    if (state.quote.payoutType === 'BANK') orderBody.allocations = state.quote.allocations;
-    const result = await api('/orders', { method:'POST', headers:{ 'Idempotency-Key':idempotencyKey() }, body:JSON.stringify(orderBody) });
+    const result = await api('/orders', { method:'POST', headers:{ 'Idempotency-Key':idempotencyKey() }, body:JSON.stringify({ quoteId:state.quote.quoteId }) });
     state.orders = [result.order, ...state.orders.filter(item => item.id !== result.order.id)];
     state.activeOrderId = result.order.id;
     state.quote = null;
     renderAll();
     toastMsg('Deposit created. Send USDT to the assigned TRON address.');
-    setTimeout(() => document.querySelector('.digi-channel-active')?.scrollIntoView({ behavior:'smooth', block:'start' }), 80);
+    return result.order;
+  }
+  async function saveBankAllocations(orderId, allocations) {
+    const result = await api(`/orders/${encodeURIComponent(orderId)}/bank-allocations`, { method:'PATCH', body:JSON.stringify({ allocations }) });
+    state.orders = [result.order, ...state.orders.filter(item => item.id !== result.order.id)];
+    state.activeOrderId = activeOrder()?.id || null;
+    renderAll();
     return result.order;
   }
   async function lockQuoteProduction() {
@@ -305,12 +303,25 @@
   function openOrder(id) { const order = state.orders.find(item => item.id === id); if (!order) return; const timeline = (order.timeline || []).map(item => `<div class="tl done"><div class="tl-mark">✓</div><div><b>${esc(item.status)}</b><small>${esc(date(item.at))}</small></div></div>`).join(''); const refs = order.payout?.references || []; $('orderDetail').innerHTML = `<div style="display:flex;justify-content:space-between;gap:10px"><div><h3>${esc(order.id)}</h3><p class="desc">${esc(order.payoutType)} · ${num(order.usdtAmount)} USDT · ${inr(order.inrAmount)}</p></div><span class="status-pill ${statusClass(order.status)}">${esc(order.status)}</span></div><div class="detail-list"><div><dt>Deposit address</dt><dd class="digi-copy">${esc(order.depositAddress)}</dd></div><div><dt>TXID</dt><dd class="digi-copy">${esc(order.txId || 'Not detected')}</dd></div><div><dt>Confirmations</dt><dd>${esc(order.confirmations)} / ${esc(order.requiredConfirmations)}</dd></div><div><dt>Received</dt><dd>${order.receivedUsdt === null ? '—' : `${num(order.receivedUsdt)} USDT`}</dd></div><div><dt>Payout</dt><dd>${esc(order.payout?.status || 'Pending')}</dd></div></div><div class="subsection"><h3>Timeline</h3><div class="timeline">${timeline || '<span class="muted">No events yet</span>'}</div></div>${refs.length ? `<div class="notice">${refs.map(ref => `${esc(ref.mode || '')}: ${esc(ref.reference || '')} · ${inr(ref.inrAmount)}`).join('<br>')}</div>` : ''}`; show($('orderOv')); }
 
   function renderMethods() { const node = $('profileMethods'); if (!node) return; const rows = state.methods.slice(0, 3); node.innerHTML = rows.length ? rows.map(method => `<div class="profile-method-row"><div class="profile-method-copy"><b>${esc(method.type === 'UPI' ? 'UPI ID' : method.label || 'Bank account')}</b><small>${esc(method.type === 'UPI' ? method.upiId : `•••• ${String(method.accountNumber || '').slice(-4)} · ${method.ifsc || ''}`)} · ${esc(method.holderName)}</small><span>${inr(method.minInr)}–${inr(method.maxInr)} per trade · ${method.enabled ? 'Enabled' : 'Disabled'}</span></div><button class="toggle ${method.enabled ? 'on' : ''}" onclick="toggleMethod('${esc(method.id)}')"> </button></div>`).join('') : '<div class="empty compact-empty"><b>No payout methods</b><p>Add a UPI ID or bank account.</p></div>'; }
-  function openManage() { renderManage(); show($('manageOv')); }
-  function renderManage() { const node = $('manageList'); if (!node) return; node.innerHTML = state.methods.length ? state.methods.map(method => `<div class="manage-method"><div class="manage-top"><div class="manage-copy"><b>${esc(method.label || method.upiId || 'Payout method')}</b><small>${esc(method.type === 'UPI' ? method.upiId : `•••• ${String(method.accountNumber || '').slice(-4)} · ${method.ifsc || ''}`)}</small></div><button class="toggle ${method.enabled ? 'on' : ''}" onclick="toggleMethod('${esc(method.id)}')"> </button></div><div class="capacity-row"><span>${inr(method.minInr)}–${inr(method.maxInr)} per trade</span><b>${inr(method.dailyLimitInr)} daily</b></div><div class="manage-footer"><button class="ghost-btn" onclick="editLimits('${esc(method.id)}')">Edit limits</button><button class="ghost-btn" onclick="editMethod('${esc(method.id)}')">Edit details</button><button class="more-btn" onclick="askDelete('${esc(method.id)}')">Delete</button></div></div>`).join('') : '<div class="digi-empty">No payout methods saved.</div>'; }
+  function openManage(type = null) {
+    const filter = ['UPI','BANK'].includes(String(type || '').toUpperCase()) ? String(type).toUpperCase() : '';
+    const overlay = $('manageOv');
+    if (overlay) overlay.dataset.filterType = filter;
+    renderManage(filter);
+    const heading = overlay?.querySelector('h3');
+    if (heading) heading.textContent = filter === 'UPI' ? 'Manage UPI IDs' : filter === 'BANK' ? 'Manage Bank Accounts' : 'Manage Bank & UPI';
+    show(overlay);
+  }
+  function renderManage(type = null) {
+    const node = $('manageList'); if (!node) return;
+    const filter = ['UPI','BANK'].includes(String(type || $('manageOv')?.dataset.filterType || '').toUpperCase()) ? String(type || $('manageOv')?.dataset.filterType).toUpperCase() : '';
+    const rows = filter ? state.methods.filter(method => method.type === filter) : state.methods;
+    node.innerHTML = rows.length ? rows.map(method => `<div class="manage-method"><div class="manage-top"><div class="manage-copy"><b>${esc(method.label || method.upiId || 'Payout method')}</b><small>${esc(method.type === 'UPI' ? method.upiId : `â€¢â€¢â€¢â€¢ ${String(method.accountNumber || '').slice(-4)} Â· ${method.ifsc || ''}`)}</small></div><button class="toggle ${method.enabled ? 'on' : ''}" onclick="toggleMethod('${esc(method.id)}')"> </button></div><div class="capacity-row"><span>${inr(method.minInr)}â€“${inr(method.maxInr)} per trade</span><b>${inr(method.remainingDailyInr ?? method.dailyLimitInr)} available today</b></div><div class="manage-footer"><button class="ghost-btn" onclick="editLimits('${esc(method.id)}')">Edit limits</button><button class="ghost-btn" onclick="editMethod('${esc(method.id)}')">Edit details</button><button class="more-btn" onclick="askDelete('${esc(method.id)}')">Delete</button></div></div>`).join('') : `<div class="digi-empty">No ${filter === 'UPI' ? 'UPI IDs' : filter === 'BANK' ? 'bank accounts' : 'payout methods'} saved.</div>`;
+  }
   function openAdd(type, method = null) { const isBank = String(type).toUpperCase() === 'BANK'; $('addOv').dataset.editId = method?.id || ''; $('addUpiTab')?.classList.toggle('active', !isBank); $('addBankTab')?.classList.toggle('active', isBank); $('upiFields').style.display = isBank ? 'none' : ''; $('bankFields').style.display = isBank ? '' : 'none'; if (!$('bankInstitution')) $('bankFields').insertAdjacentHTML('afterbegin', '<label class="label">Bank name</label><input id="bankInstitution" class="input" placeholder="Bank name">'); setAddType(isBank ? 'bank' : 'upi'); if (method) { $('upiId').value = method.upiId || ''; $('upiName').value = method.holderName || ''; $('upiMobile').value = method.mobile || ''; $('bankInstitution').value = method.bankName || ''; $('bankAcc').value = ''; $('bankAcc2').value = ''; $('bankIfsc').value = method.ifsc || ''; $('bankName').value = method.holderName || ''; $('bankMobile').value = method.mobile || ''; $('addMin').value = method.minInr || ''; $('addMax').value = method.maxInr || ''; $('addDaily').value = method.dailyLimitInr || ''; } else { document.querySelectorAll('#addOv input').forEach(input => { if (input.type !== 'hidden') input.value = ''; }); } show($('addOv')); }
   function setAddType(type) { const isBank = String(type).toLowerCase() === 'bank'; $('addUpiTab')?.classList.toggle('active', !isBank); $('addBankTab')?.classList.toggle('active', isBank); $('upiFields').style.display = isBank ? 'none' : ''; $('bankFields').style.display = isBank ? '' : 'none'; }
   async function saveMethod() { const editId = $('addOv').dataset.editId; const isBank = $('bankFields').style.display !== 'none'; const body = { type:isBank ? 'BANK' : 'UPI', label:isBank ? `Bank ••${$('bankAcc').value.slice(-4)}` : 'UPI', minInr:Number($('addMin').value), maxInr:Number($('addMax').value), dailyLimitInr:Number($('addDaily').value) }; if (isBank) Object.assign(body, { bankName:$('bankInstitution').value.trim(), accountNumber:$('bankAcc').value.trim(), ifsc:$('bankIfsc').value.trim(), holderName:$('bankName').value.trim(), mobile:$('bankMobile').value.trim() }); else Object.assign(body, { upiId:$('upiId').value.trim(), holderName:$('upiName').value.trim(), mobile:$('upiMobile').value.trim() }); try { await api(editId ? `/payout-methods/${encodeURIComponent(editId)}` : '/payout-methods', { method:editId ? 'PATCH' : 'POST', body:JSON.stringify(body) }); hide($('addOv')); await refreshAll(); toastMsg(editId ? 'Payout method updated' : 'Payout method saved'); } catch (error) { toastMsg(error.message, true); } }
-  async function toggleMethod(id) { const method = state.methods.find(item => item.id === id); if (!method) return; try { await api(`/payout-methods/${encodeURIComponent(id)}/status`, { method:'PATCH', body:JSON.stringify({ enabled:!method.enabled }) }); await refreshAll(); toastMsg(method.enabled ? 'Payout method disabled' : 'Payout method enabled'); } catch (error) { toastMsg(error.message, true); } }
+  async function toggleMethod(id) { const method = state.methods.find(item => item.id === id); if (!method) return; try { await api(`/payout-methods/${encodeURIComponent(id)}/status`, { method:'PATCH', body:JSON.stringify({ enabled:!method.enabled }) }); await refreshAll(); if ($('manageOv')?.classList.contains('show')) renderManage($('manageOv').dataset.filterType || null); toastMsg(method.enabled ? 'Payout method disabled' : 'Payout method enabled'); } catch (error) { toastMsg(error.message, true); } }
   function editLimits(id) { const method = state.methods.find(item => item.id === id); if (!method) return; $('editId').value = id; $('editMin').value = method.minInr; $('editMax').value = method.maxInr; $('editDaily').value = method.dailyLimitInr; show($('limitOv')); }
   async function saveLimits() { const id = $('editId').value; try { await api(`/payout-methods/${encodeURIComponent(id)}`, { method:'PATCH', body:JSON.stringify({ minInr:Number($('editMin').value), maxInr:Number($('editMax').value), dailyLimitInr:Number($('editDaily').value) }) }); hide($('limitOv')); await refreshAll(); toastMsg('Limits updated'); } catch (error) { toastMsg(error.message, true); } }
   function editMethod(id) { const method = state.methods.find(item => item.id === id); if (method) { hide($('manageOv')); openAdd(method.type, method); } }
@@ -369,6 +380,8 @@
   function go(page) { document.querySelectorAll('.page').forEach(node=>node.classList.toggle('active',node.id===page)); document.querySelectorAll('.nav button').forEach(node=>node.classList.toggle('active',node.dataset.page===page)); const titles={home:['Home','Trade, earn rewards and track your account.'],sell:['Sell','Sell USDT and receive INR.'],orders:['Orders','Track every trade and settlement.'],rewards:['Rewards','Server-managed rewards and campaigns.'],profile:['Profile','Account, payout methods and security.']}; setText('pageTitle',titles[page]?.[0]||'digiRupee'); setText('pageSub',titles[page]?.[1]||''); if(page==='orders')renderOrders(); if(page==='rewards'){renderTasks();renderWheel();} if(page==='profile')renderMethods(); }
   function renderActiveQr() { const holder = document.querySelector('.digi-qr-placeholder'); const order = activeOrder(); if (!holder || !order?.depositAddress || !window.digiQr) return; const canvas = document.createElement('canvas'); canvas.className = 'digi-qr'; canvas.dataset.size = '176'; canvas.setAttribute('aria-label', 'Deposit address QR'); holder.replaceWith(canvas); try { window.digiQr.render(canvas, order.depositAddress); } catch (error) { canvas.replaceWith(holder); } }
   function tick() { setText('clock',new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:false})); if(activeOrder()?.status==='Awaiting Deposit') renderActiveOrder(); renderActiveQr(); syncQuoteControls(); }
+
+  window.__digiSaveBankAllocations = saveBankAllocations;
 
   Object.assign(window, { bg, go, setType, quote, lockQuote:lockQuoteProduction, setMax, selectMethod, toggleBankAllocation, copyAddress, openOrder, setOrderFilter, openAdd, setAddType, saveMethod, toggleMethod, editLimits, saveLimits, editMethod, askDelete, confirmDelete, openManage, spin, openRewardHistory, filterTasks, claimTask, scrollTasks, openEvent, openReferral, copyReferral, openNotifications, markNotification, readAllNotifications, toggleNotifications, openSupport, newSupportTicket, createSupportTicket, openTicket, replyTicket, closeTicket, openSecurity, setup2FA:setup2FAWithQr, enable2FA, disable2FAForm, disable2FA, openSessions:openSessionsWithPassword, revokeSession, revokeOtherSessions, changePassword, openProfileEdit, saveProfile, copyUserId, openLanguage, setLanguage, openTheme, setTheme, openChart, openPortfolio, logout, toastMsg });
 
