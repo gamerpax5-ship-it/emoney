@@ -4533,10 +4533,7 @@ const server = http.createServer(async (req, res) => {
     const digiPageAliases = new Map([
       ['/', 'digirupee-download.html'],
       ['/download', 'digirupee-download.html'],
-      ['/admin', 'digirupee-admin.html'],
-      ['/admin/', 'digirupee-admin.html'],
-      ['/admin.html', 'digirupee-admin.html'],
-      ['/digirupee-admin.html', 'digirupee-admin.html']
+      ['/admin', 'digirupee-admin.html']
     ]);
     let hostRelativePath = '';
 
@@ -4563,6 +4560,12 @@ const server = http.createServer(async (req, res) => {
       return send(res, 503, { error: 'digiRupee APK is being prepared. Please try again shortly.' });
     }
 
+    const legacyAdminPath = pathname === '/admin/' || pathname === '/admin.html' || pathname === '/digirupee-admin.html';
+    if (legacyAdminPath) {
+      res.writeHead(308, { Location: '/admin', 'Cache-Control': 'no-store' });
+      return res.end();
+    }
+
     if (isDigiRupeeHost) {
       hostRelativePath = digiPageAliases.get(pathname) || '';
       if (!hostRelativePath && digiStaticFiles.has(pathname) && isDigiRupeeClient) {
@@ -4572,6 +4575,8 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
         return res.end('Not found');
       }
+    } else if (pathname === '/admin') {
+      hostRelativePath = 'admin.html';
     } else if (digiStaticFiles.has(pathname) || pathname === '/digirupee-admin.html') {
       if (pathname === '/digirupee-app.html' && isDigiRupeeClient) {
         res.writeHead(307, { Location: 'https://digirupee.loktron.com/digirupee-app.html', 'Cache-Control': 'no-store' });
