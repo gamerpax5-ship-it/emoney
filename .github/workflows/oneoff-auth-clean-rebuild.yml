@@ -1,0 +1,136 @@
+name: Clean rebuild digiRupee auth
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/oneoff-auth-clean-rebuild.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Rebuild auth UI cleanly
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('ui/digirupee-app.js')
+          s = p.read_text(encoding='utf-8')
+          start = s.index('  function digiUsdtLogo(size = 34) {')
+          end = s.index('  async function submitAuth(event) {', start)
+
+          block = r'''  function digiUsdtLogo(size = 58) {
+    return `<span class="digi-usdt-logo" style="--usdt-size:${Number(size) || 58}px" aria-label="USDT">₮</span>`;
+  }
+
+  function injectAuth() {
+    const style = document.createElement('style');
+    style.textContent = `
+      .digi-auth{position:fixed;inset:0;z-index:1000;overflow:auto;padding:max(28px,env(safe-area-inset-top)) 18px max(24px,env(safe-area-inset-bottom));background:radial-gradient(circle at 50% 8%,rgba(38,161,123,.14),transparent 25%),#06080a;color:#f7f8fa;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+      .digi-auth[hidden]{display:none}.digi-auth *{box-sizing:border-box}.digi-auth button,.digi-auth input{font:inherit}.digi-auth-shell{width:min(100%,410px);min-height:calc(100svh - 56px);margin:0 auto;display:flex;flex-direction:column;justify-content:center}
+      .digi-auth-brand{text-align:center;margin:0 0 24px}.digi-usdt-logo{--usdt-size:58px;width:var(--usdt-size);height:var(--usdt-size);margin:auto;border-radius:50%;display:grid;place-items:center;background:#26a17b;color:#fff;font-family:Arial Black,Arial,sans-serif;font-size:calc(var(--usdt-size)*.54);font-weight:900;line-height:1;box-shadow:0 14px 38px rgba(38,161,123,.24),inset 0 0 0 1px rgba(255,255,255,.18)}
+      .digi-auth-brand h1{margin:12px 0 3px;font-size:25px;line-height:1.05;letter-spacing:-.035em;color:#fff}.digi-auth-brand p{margin:0;color:#8f97a2;font-size:11.5px;line-height:1.4}
+      .digi-auth-card{border:1px solid #262b33;border-radius:22px;background:linear-gradient(180deg,#12151a,#0d1014);box-shadow:0 28px 70px rgba(0,0,0,.42);padding:20px}
+      .digi-auth-head{margin-bottom:18px}.digi-auth-head h2{margin:0;color:#fff;font-size:23px;line-height:1.1;letter-spacing:-.03em}.digi-auth-head p{margin:6px 0 0;color:#9aa2ad;font-size:11.5px;line-height:1.45}
+      .digi-auth-fields{display:grid;gap:13px}.digi-auth-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.digi-auth-field{display:grid;gap:7px}.digi-auth-field label{color:#c3c9d1;font-size:10.5px;font-weight:800;letter-spacing:.04em}.digi-auth-input{display:flex;align-items:center;min-height:52px;border:1px solid #2c323b;border-radius:13px;background:#090c10;transition:.18s ease}.digi-auth-input:focus-within{border-color:#348e73;box-shadow:0 0 0 3px rgba(38,161,123,.08)}.digi-auth-input .icon{width:42px;flex:none;display:grid;place-items:center;color:#77808c;font-size:14px}.digi-auth-input input{width:100%;height:50px;border:0;outline:0;background:transparent;color:#fff;padding:0 12px 0 0;font-size:14px}.digi-auth-input input::placeholder{color:#69717d}.digi-auth-show{border:0;background:transparent;color:#aeb5bf;padding:0 13px;font-size:10.5px;font-weight:800}
+      .digi-auth-error{margin:10px 1px 0;color:#ff8d99;font-size:10.5px;line-height:1.4}.digi-auth-error:empty{display:none}
+      .digi-auth-primary{width:100%;min-height:51px;margin-top:16px;border:0;border-radius:13px;background:linear-gradient(100deg,#f1c64b,#ffd96d);color:#211900;font-size:13px;font-weight:950;box-shadow:0 12px 26px rgba(184,135,23,.17)}.digi-auth-primary:active{transform:translateY(1px)}
+      .digi-auth-switch{display:flex;align-items:center;justify-content:center;gap:6px;margin-top:16px;color:#929aa5;font-size:11px}.digi-auth-switch button{border:0;background:transparent;color:#f2cf62;padding:2px 0;font-size:11px;font-weight:900}.digi-auth-terms{margin:14px 8px 0;color:#7d8590;text-align:center;font-size:9.5px;line-height:1.45}.digi-auth-terms b{color:#aeb4bd}.digi-auth-back{display:block;width:100%;margin-top:13px;border:0;background:transparent;color:#f2cf62;font-size:10.5px;font-weight:900}
+      .digi-auth-challenge p{margin:6px 0 17px;color:#9aa2ad;font-size:11.5px;line-height:1.45}
+      .digi-security-extra{margin-top:12px;padding:11px;border:1px solid #292c34;border-radius:12px;background:#0c0e12}.digi-security-extra code{word-break:break-all;color:#f4d66e;font-size:10px}.digi-empty{padding:18px;text-align:center;color:#8d919b;font-size:11px}.digi-action-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.digi-action-row button{flex:1;min-width:120px}.digi-copy{word-break:break-all;color:#f4d66e;font-size:11px}
+      @media(max-width:370px){.digi-auth{padding-left:14px;padding-right:14px}.digi-auth-shell{justify-content:flex-start;padding-top:28px}.digi-auth-brand{margin-bottom:18px}.digi-auth-card{padding:17px}.digi-auth-row{grid-template-columns:1fr}.digi-auth-head h2{font-size:21px}}
+    `;
+    document.head.appendChild(style);
+    const node = document.createElement('div');
+    node.id = 'digiAuth';
+    node.className = 'digi-auth';
+    node.hidden = true;
+    node.innerHTML = `<div class="digi-auth-shell"><div class="digi-auth-brand">${digiUsdtLogo(62)}<h1>digiRupee</h1><p>USDT to INR</p></div><section class="digi-auth-card"><div id="digiAuthBody"></div></section></div>`;
+    document.body.appendChild(node);
+  }
+
+  function renderAuth(mode = 'login', error = '') {
+    const body = $('digiAuthBody');
+    if (!body) return;
+    if (mode === 'challenge') {
+      body.innerHTML = `<div class="digi-auth-challenge"><div class="digi-auth-head"><h2>Verify login</h2><p>Enter your authenticator or recovery code.</p></div><form id="digi2faForm"><div class="digi-auth-field"><label>VERIFICATION CODE</label><div class="digi-auth-input"><span class="icon">◆</span><input id="digi2faCode" inputmode="text" autocomplete="one-time-code" placeholder="Enter code" required></div></div><div id="digiAuthError" class="digi-auth-error">${esc(error)}</div><button class="digi-auth-primary" type="submit">Verify</button></form></div>`;
+      $('digi2faForm')?.addEventListener('submit', submitTwoFactorLogin);
+      return;
+    }
+    const register = mode === 'register';
+    body.innerHTML = `<div class="digi-auth-head"><h2>${register ? 'Create account' : 'Welcome back'}</h2><p>${register ? 'Enter your details to register.' : 'Sign in to continue.'}</p></div><form id="digiAuthForm"><div class="digi-auth-fields">${register ? `<div class="digi-auth-row"><div class="digi-auth-field"><label>FULL NAME</label><div class="digi-auth-input"><span class="icon">●</span><input id="digiFullName" autocomplete="name" maxlength="80" placeholder="Your name" required></div></div><div class="digi-auth-field"><label>MOBILE</label><div class="digi-auth-input"><span class="icon">✦</span><input id="digiMobile" inputmode="tel" autocomplete="tel" maxlength="16" placeholder="Mobile number" required></div></div></div>` : '<div id="digiRegisterFields" hidden></div>'}<div class="digi-auth-field"><label>EMAIL ADDRESS</label><div class="digi-auth-input"><span class="icon">✉</span><input id="digiEmail" type="email" autocomplete="email" placeholder="name@example.com" required></div></div><div class="digi-auth-field"><label>PASSWORD</label><div class="digi-auth-input"><span class="icon">◆</span><input id="digiPassword" type="password" autocomplete="${register ? 'new-password' : 'current-password'}" minlength="8" placeholder="Enter password" required><button class="digi-auth-show" id="digiPasswordToggle" type="button">SHOW</button></div></div>${register ? `<div class="digi-auth-field"><label>REFERRAL CODE <span style="color:#6e7681;font-weight:600">OPTIONAL</span></label><div class="digi-auth-input"><span class="icon">↗</span><input id="digiReferral" autocomplete="off" maxlength="30" placeholder="Referral code"></div></div>` : ''}</div><div id="digiAuthError" class="digi-auth-error">${esc(error)}</div><button class="digi-auth-primary" type="submit">${register ? 'Create account' : 'Sign in'}</button>${register ? '<p class="digi-auth-terms">By registering you agree to the <b>Terms</b> and <b>Privacy Policy</b>.</p><button class="digi-auth-back" type="button" data-auth-mode="login">Already registered? Sign in</button>' : '<div class="digi-auth-switch"><span>New user?</span><button type="button" data-auth-mode="register">Register</button></div>'}</form>`;
+    body.querySelectorAll('[data-auth-mode]').forEach(button => button.addEventListener('click', () => renderAuth(button.dataset.authMode)));
+    $('digiPasswordToggle')?.addEventListener('click', () => {
+      const input = $('digiPassword');
+      if (!input) return;
+      const visible = input.type === 'text';
+      input.type = visible ? 'password' : 'text';
+      $('digiPasswordToggle').textContent = visible ? 'SHOW' : 'HIDE';
+    });
+    $('digiAuthForm')?.addEventListener('submit', submitAuth);
+  }
+
+'''
+          s = s[:start] + block + s[end:]
+          p.write_text(s, encoding='utf-8')
+
+          # Force a new asset URL so existing WebViews cannot reuse an older auth bundle.
+          p = Path('scripts/prepare-assets.mjs')
+          s = p.read_text(encoding='utf-8')
+          old = '<script src="/digirupee-qr.js" defer></script><script src="/digirupee-app.js" defer></script><script src="/digirupee-rewards-assets.js" defer></script><script src="/digirupee-rewards.js" defer></script><script src="/digirupee-layout-v3.js" defer></script>'
+          new = '<script src="/digirupee-qr.js?v=20260915b" defer></script><script src="/digirupee-app.js?v=20260915b" defer></script><script src="/digirupee-rewards-assets.js?v=20260915b" defer></script><script src="/digirupee-rewards.js?v=20260915b" defer></script><script src="/digirupee-layout-v3.js?v=20260915b" defer></script>'
+          if old not in s:
+              raise SystemExit('script injection target missing')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Validate
+        shell: bash
+        run: |
+          node --check ui/digirupee-app.js
+          node --check scripts/prepare-assets.mjs
+          npm run prepare-assets
+          node --check website/digirupee-app.js
+          node --test tests/digirupee-pool-flow.test.mjs
+          git diff --check
+          grep -q 'digi-usdt-logo' ui/digirupee-app.js
+          ! grep -q 'Private by design' ui/digirupee-app.js
+          ! grep -q 'Move value' ui/digirupee-app.js
+          ! grep -q 'TRC20</b> network ready' ui/digirupee-app.js
+          ! grep -q 'Encrypted session' ui/digirupee-app.js
+          grep -q 'digirupee-app.js?v=20260915b' scripts/prepare-assets.mjs
+
+      - name: Keep canonical changes only
+        shell: bash
+        run: |
+          git restore website/digirupee-app.html website/digirupee-app.js website/digirupee-qr.js website/digirupee-rewards.js website/digirupee-rewards-assets.js website/digirupee-layout-v3.js android/app/src/main/assets/offline.html 2>/dev/null || true
+          git diff --check
+          changed="$(git diff --name-only | sort)"
+          expected="$(printf '%s\n' 'scripts/prepare-assets.mjs' 'ui/digirupee-app.js' | sort)"
+          test "$changed" = "$expected"
+
+      - name: Commit clean auth and remove workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ui/digirupee-app.js scripts/prepare-assets.mjs
+          git rm .github/workflows/oneoff-auth-clean-rebuild.yml
+          git commit -m 'Rebuild digiRupee auth screen cleanly'
+          git push origin HEAD:main
