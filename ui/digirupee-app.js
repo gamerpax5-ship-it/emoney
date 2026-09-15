@@ -81,6 +81,7 @@
     const node = document.createElement('div');
     node.id = 'digiAuth';
     node.className = 'digi-auth';
+    node.hidden = true;
     node.innerHTML = `<div class="digi-auth-card"><div class="digi-auth-brand"><div class="digi-auth-brand-mark">₮</div><div><h2>digiRupee</h2><p style="margin:3px 0 0">Secure USDT to INR settlement</p></div></div><div id="digiAuthBody"></div></div>`;
     document.body.appendChild(node);
   }
@@ -126,6 +127,7 @@
   }
 
   async function authenticated(result) {
+    document.body.classList.add('digi-ready');
     state.user = result.user || null;
     state.profile = result.profile || null;
     $('digiAuth').hidden = true;
@@ -390,9 +392,15 @@
   document.addEventListener('DOMContentLoaded', async () => {
     injectAuth();
     const app = document.querySelector('.app'); if (app) app.style.display = 'none';
-    renderAuth('login');
     setInterval(tick, 1000); tick();
-    try { const result = await api('/me', { allow401:true }); await authenticated(result); }
-    catch (error) { if (!String(error.message).includes('401')) renderAuth('login'); }
+    try {
+      const result = await api('/me', { allow401:true });
+      await authenticated(result);
+    } catch (error) {
+      document.body.classList.add('digi-ready');
+      const auth = $('digiAuth'); if (auth) auth.hidden = false;
+      const expectedAuthFailure = /401|auth|sign in|session/i.test(String(error.message || ''));
+      renderAuth('login', expectedAuthFailure ? '' : 'Could not restore your session. Please sign in.');
+    }
   });
 })();

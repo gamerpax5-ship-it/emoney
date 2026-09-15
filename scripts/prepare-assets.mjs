@@ -53,6 +53,7 @@ function rewardAssetsFrom(source) {
 function productionHtml(source) {
   let html = source.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   html = html.replace(/<title>[\s\S]*?<\/title>/i, '<title>digiRupee — Sell USDT</title>');
+  html = html.replace(/<\/head>/i, '<style id="digi-boot-guard">body:not(.digi-ready) .app{visibility:hidden!important}body:not(.digi-ready)::before{content:"digiRupee";position:fixed;inset:0;z-index:999;display:grid;place-items:center;background:#050607;color:#f1cf67;font:800 22px system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:-.02em}</style></head>');
   html = html.replace(/<details class="prototype-box">[\s\S]*?<\/details>/gi, '');
   html = html.replace(/Prototype intraday rate movement\./gi, 'Live rate snapshot.');
   html = html.replace(/Prototype toggle for an additional login verification step\./gi, 'Use an authenticator app and recovery code.');
