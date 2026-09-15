@@ -3,6 +3,9 @@
 
   const PREFS_KEY = 'digirupee-ui-preferences';
   const REF_KEY = 'digirupee-pending-referral';
+  let referralRegistrationPending = false;
+  let registerAutoOpened = false;
+
   const LANGUAGES = {
     en: 'English',
     zh: '中文',
@@ -12,33 +15,19 @@
   };
 
   const TEXT = {
-    zh: {
-      Home: '首页', Sell: '出售', Orders: '订单', Rewards: '奖励', Profile: '个人资料',
-      Language: '语言', Theme: '主题', Notifications: '通知', 'Refer & Earn': '推荐赚佣金',
-      'Help & Support': '帮助与支持', Logout: '退出', 'SELL USDT,': '出售 USDT,', 'GET INR': '获得 INR'
-    },
-    te: {
-      Home: 'హోమ్', Sell: 'అమ్మండి', Orders: 'ఆర్డర్లు', Rewards: 'రివార్డులు', Profile: 'ప్రొఫైల్',
-      Language: 'భాష', Theme: 'థీమ్', Notifications: 'నోటిఫికేషన్లు', 'Refer & Earn': 'రిఫర్ చేసి సంపాదించండి',
-      'Help & Support': 'సహాయం', Logout: 'లాగ్ అవుట్', 'SELL USDT,': 'USDT అమ్మండి,', 'GET INR': 'INR పొందండి'
-    },
-    or: {
-      Home: 'ହୋମ', Sell: 'ବିକ୍ରି', Orders: 'ଅର୍ଡର', Rewards: 'ପୁରସ୍କାର', Profile: 'ପ୍ରୋଫାଇଲ',
-      Language: 'ଭାଷା', Theme: 'ଥିମ୍', Notifications: 'ନୋଟିଫିକେସନ୍', 'Refer & Earn': 'ରେଫର୍ କରି ଆୟ କରନ୍ତୁ',
-      'Help & Support': 'ସହାୟତା', Logout: 'ଲଗ୍ ଆଉଟ୍', 'SELL USDT,': 'USDT ବିକ୍ରି କରନ୍ତୁ,', 'GET INR': 'INR ପାଆନ୍ତୁ'
-    },
-    ml: {
-      Home: 'ഹോം', Sell: 'വിൽക്കുക', Orders: 'ഓർഡറുകൾ', Rewards: 'റിവാർഡുകൾ', Profile: 'പ്രൊഫൈൽ',
-      Language: 'ഭാഷ', Theme: 'തീം', Notifications: 'അറിയിപ്പുകൾ', 'Refer & Earn': 'റഫർ ചെയ്ത് സമ്പാദിക്കുക',
-      'Help & Support': 'സഹായം', Logout: 'ലോഗ് ഔട്ട്', 'SELL USDT,': 'USDT വിൽക്കുക,', 'GET INR': 'INR നേടുക'
-    }
+    zh: { Home:'首页', Sell:'出售', Orders:'订单', Rewards:'奖励', Profile:'个人资料', Language:'语言', Theme:'主题', Notifications:'通知', 'Refer & Earn':'推荐赚佣金', 'Help & Support':'帮助与支持', Logout:'退出', 'SELL USDT,':'出售 USDT,', 'GET INR':'获得 INR' },
+    te: { Home:'హోమ్', Sell:'అమ్మండి', Orders:'ఆర్డర్లు', Rewards:'రివార్డులు', Profile:'ప్రొఫైల్', Language:'భాష', Theme:'థీమ్', Notifications:'నోటిఫికేషన్లు', 'Refer & Earn':'రిఫర్ చేసి సంపాదించండి', 'Help & Support':'సహాయం', Logout:'లాగ్ అవుట్', 'SELL USDT,':'USDT అమ్మండి,', 'GET INR':'INR పొందండి' },
+    or: { Home:'ହୋମ', Sell:'ବିକ୍ରି', Orders:'ଅର୍ଡର', Rewards:'ପୁରସ୍କାର', Profile:'ପ୍ରୋଫାଇଲ', Language:'ଭାଷା', Theme:'ଥିମ୍', Notifications:'ନୋଟିଫିକେସନ୍', 'Refer & Earn':'ରେଫର୍ କରି ଆୟ କରନ୍ତୁ', 'Help & Support':'ସହାୟତା', Logout:'ଲଗ୍ ଆଉଟ୍', 'SELL USDT,':'USDT ବିକ୍ରି କରନ୍ତୁ,', 'GET INR':'INR ପାଆନ୍ତୁ' },
+    ml: { Home:'ഹോം', Sell:'വിൽക്കുക', Orders:'ഓർഡറുകൾ', Rewards:'റിവാർഡുകൾ', Profile:'പ്രൊഫൈൽ', Language:'ഭാഷ', Theme:'തീം', Notifications:'അറിയിപ്പുകൾ', 'Refer & Earn':'റഫർ ചെയ്ത് സമ്പാദിക്കുക', 'Help & Support':'സഹായം', Logout:'ലോഗ് ഔട്ട്', 'SELL USDT,':'USDT വിൽക്കുക,', 'GET INR':'INR നേടുക' }
   };
 
   const readPrefs = () => {
-    try { return { language: 'en', theme: 'midnight', ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') }; }
-    catch { return { language: 'en', theme: 'midnight' }; }
+    try { return { language:'en', theme:'midnight', ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') }; }
+    catch { return { language:'en', theme:'midnight' }; }
   };
   const savePrefs = prefs => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch {} };
+  const normalizeReferral = value => String(value || '').trim().toUpperCase();
+  const validReferral = value => /^DGR[A-F0-9]{10}$/.test(normalizeReferral(value));
 
   function ensureReadableTypography() {
     if (document.getElementById('digi-readable-type')) return;
@@ -74,11 +63,7 @@
       body .reward-v4-task p{font-size:10.8px!important;line-height:1.5!important}
       body .reward-v4-task-reward{font-size:10.5px!important}
       body .reward-v4-task button{font-size:10.5px!important}
-      @media(max-width:370px){
-        body{font-size:14.5px!important}
-        body small{font-size:11.5px!important}
-        body .menu-row b,body .history-row b{font-size:13.5px!important}
-      }
+      @media(max-width:370px){body{font-size:14.5px!important}body small{font-size:11.5px!important}body .menu-row b,body .history-row b{font-size:13.5px!important}}
     `;
     document.head.appendChild(style);
   }
@@ -134,9 +119,7 @@
       const prefs = readPrefs();
       if (sheet) {
         sheet.innerHTML = `<div class="handle"></div><h3>Language</h3><div class="menu-card">${Object.entries(LANGUAGES).map(([code,name]) => `<button class="menu-row" data-digi-lang="${code}"><div><b>${name}</b></div><strong>${prefs.language === code ? '✓' : '›'}</strong></button>`).join('')}</div>`;
-        sheet.querySelectorAll('[data-digi-lang]').forEach(button => button.addEventListener('click', () => {
-          const next = readPrefs(); next.language = button.dataset.digiLang; savePrefs(next); overlay.classList.remove('show'); applyTranslations();
-        }));
+        sheet.querySelectorAll('[data-digi-lang]').forEach(button => button.addEventListener('click', () => { const next = readPrefs(); next.language = button.dataset.digiLang; savePrefs(next); overlay.classList.remove('show'); applyTranslations(); }));
       }
       overlay?.classList.add('show');
     };
@@ -148,29 +131,70 @@
       const themes = [['light','Light'],['midnight','Midnight'],['pure','Pure Black']];
       if (sheet) {
         sheet.innerHTML = `<div class="handle"></div><h3>Theme</h3><div class="menu-card">${themes.map(([code,name]) => `<button class="menu-row" data-digi-theme="${code}"><div><b>${name}</b></div><strong>${prefs.theme === code ? '✓' : '›'}</strong></button>`).join('')}</div>`;
-        sheet.querySelectorAll('[data-digi-theme]').forEach(button => button.addEventListener('click', () => {
-          const next = readPrefs(); next.theme = button.dataset.digiTheme; savePrefs(next); overlay.classList.remove('show'); applyTheme();
-        }));
+        sheet.querySelectorAll('[data-digi-theme]').forEach(button => button.addEventListener('click', () => { const next = readPrefs(); next.theme = button.dataset.digiTheme; savePrefs(next); overlay.classList.remove('show'); applyTheme(); }));
       }
       overlay?.classList.add('show');
     };
   }
 
-  function captureReferral() {
+  function saveReferral(value) {
+    const ref = normalizeReferral(value);
+    if (!validReferral(ref)) return false;
+    try { localStorage.setItem(REF_KEY, ref); } catch {}
+    referralRegistrationPending = true;
+    return true;
+  }
+
+  function captureReferralFromUrl() {
+    try { saveReferral(new URL(location.href).searchParams.get('ref')); } catch {}
+  }
+
+  function captureReferralFromAndroid() {
+    try { saveReferral(window.DigiAndroid?.consumeReferralMarker?.()); } catch {}
+  }
+
+  function pendingReferral() {
     try {
-      const ref = new URL(location.href).searchParams.get('ref');
-      if (ref) localStorage.setItem(REF_KEY, ref.trim());
-    } catch {}
+      const ref = normalizeReferral(localStorage.getItem(REF_KEY) || '');
+      return validReferral(ref) ? ref : '';
+    } catch { return ''; }
+  }
+
+  function autoOpenReferralRegister() {
+    const ref = pendingReferral();
+    if (!ref) return;
+    const auth = document.getElementById('digiAuth');
+    if (!auth || auth.hidden) return;
+
+    const referralInput = document.getElementById('digiReferral');
+    if (referralInput) {
+      referralInput.value = ref;
+      referralInput.readOnly = true;
+      const field = referralInput.closest('.digi-auth-field');
+      if (field) field.style.display = 'none';
+      referralRegistrationPending = false;
+      registerAutoOpened = true;
+      return;
+    }
+
+    if (!registerAutoOpened) {
+      const registerButton = auth.querySelector('[data-auth-mode="register"]');
+      if (registerButton) {
+        registerAutoOpened = true;
+        registerButton.click();
+      }
+    }
   }
 
   function autofillReferral() {
     const input = document.getElementById('digiReferral');
-    const ref = localStorage.getItem(REF_KEY) || '';
+    const ref = pendingReferral();
     if (input && ref) {
       if (input.value !== ref) input.value = ref;
       input.readOnly = true;
       const field = input.closest('.digi-auth-field');
       if (field) field.style.display = 'none';
+      referralRegistrationPending = false;
     }
   }
 
@@ -179,10 +203,10 @@
     if (!refInput) return;
     const raw = String(refInput.value || '');
     let code = '';
-    try { code = new URL(raw, location.origin).searchParams.get('ref') || ''; } catch {}
-    if (!code && /^[A-Za-z0-9_-]{3,30}$/.test(raw)) code = raw;
+    try { code = normalizeReferral(new URL(raw, location.origin).searchParams.get('ref') || ''); } catch {}
+    if (!code && validReferral(raw)) code = normalizeReferral(raw);
     if (code) {
-      const value = `https://digirupee.loktron.com/download/digirupee.apk?ref=${encodeURIComponent(code)}`;
+      const value = `https://digirupee.loktron.com/download?ref=${encodeURIComponent(code)}`;
       if (refInput.value !== value) refInput.value = value;
     }
   }
@@ -208,7 +232,8 @@
     return response;
   };
 
-  captureReferral();
+  captureReferralFromUrl();
+  captureReferralFromAndroid();
   ensureReadableTypography();
   ensureLightTheme();
   installLanguageAndThemeMenus();
@@ -222,6 +247,7 @@
       ensureReadableTypography();
       applyTheme();
       applyTranslations();
+      if (referralRegistrationPending || pendingReferral()) autoOpenReferralRegister();
       autofillReferral();
       makeReferralDownloadLink();
     });
@@ -231,6 +257,7 @@
   observer.observe(document.documentElement, { childList:true, subtree:true });
 
   window.addEventListener('DOMContentLoaded', () => {
+    captureReferralFromAndroid();
     refreshUiEnhancements();
     try { window.DigiAndroid?.requestNotificationPermission?.(); } catch {}
   });
