@@ -46,7 +46,7 @@
     const style = document.createElement('style');
     style.id = 'digi-rewards-v4-css';
     style.textContent = `
-      #rewards.reward-v4-ready{padding:0 0 calc(18px + var(--digi-safe-bottom,0px))!important;background:#050607!important;box-sizing:border-box}
+      #rewards.reward-v4-ready{padding:0 0 calc(94px + var(--digi-safe-bottom,0px))!important;background:#050607!important;box-sizing:border-box}
       #rewards.reward-v4-ready>*:not(.reward-v4-root){display:none!important}
       .reward-v4-root{display:flex;flex-direction:column;gap:8px;padding-top:2px;color:#f8f2e8}
       .reward-v4-hero{position:relative;overflow:hidden;min-height:195px;border:1px solid #7a3a20;border-radius:18px;padding:15px;background:
@@ -54,25 +54,24 @@
         radial-gradient(circle at 78% 76%,rgba(235,73,52,.26),transparent 28%),
         linear-gradient(135deg,#4c0b0b 0%,#230809 56%,#0d0a0a 100%);
         box-shadow:inset 0 1px rgba(255,255,255,.04)}
-      .reward-v4-hero:before,.reward-v4-hero:after{content:'₮';position:absolute;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle at 30% 25%,#fff0a0,#e3a323 68%,#724500);color:#7c4c00;font-weight:950;box-shadow:0 8px 18px #0005}
-      .reward-v4-hero:before{width:58px;height:58px;right:24px;top:26px;font-size:26px;transform:rotate(12deg)}
-      .reward-v4-hero:after{width:38px;height:38px;right:105px;bottom:27px;font-size:18px;transform:rotate(-15deg)}
-      .reward-v4-mascot{position:absolute;z-index:1;top:0;right:0;width:57%;height:84%;overflow:hidden;pointer-events:none;opacity:.96;mask-image:linear-gradient(90deg,transparent 0,#000 28%,#000 100%);-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 28%,#000 100%)}
-      .reward-v4-mascot img{position:absolute;top:-54px;right:-1px;width:176%;max-width:none;height:auto;filter:saturate(1.05) contrast(1.02)}
+      .reward-v4-hero:before{content:'';position:absolute;z-index:2;right:0;bottom:0;width:61%;height:35%;background:linear-gradient(180deg,transparent 0,rgba(34,10,10,.82) 56%,#180909 100%);pointer-events:none}
+      .reward-v4-hero:after{content:'';position:absolute;z-index:2;right:0;top:0;width:12%;height:100%;background:linear-gradient(90deg,transparent,rgba(23,8,9,.84));pointer-events:none}
+      .reward-v4-mascot{position:absolute;z-index:1;top:0;right:0;width:57%;height:86%;overflow:hidden;pointer-events:none;opacity:.96;mask-image:linear-gradient(90deg,transparent 0,#000 22%,#000 100%);-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 22%,#000 100%)}
+      .reward-v4-mascot img{position:absolute;top:-54px;right:-38%;width:176%;max-width:none;height:auto;filter:saturate(1.04) contrast(1.02)}
       .reward-v4-mascot.hidden,.reward-v4-coin.hidden{display:none!important}
-      .reward-v4-coin{position:absolute;z-index:2;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle at 32% 24%,#fff4a9 0,#f1c047 34%,#c98918 72%,#694009 100%);border:2px solid #f4cf63;color:#744606;font-weight:950;box-shadow:0 8px 18px #0008,0 0 18px #f5c84b35;pointer-events:none}
+      .reward-v4-coin{position:absolute;z-index:4;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle at 32% 24%,#fff4a9 0,#f1c047 34%,#c98918 72%,#694009 100%);border:2px solid #f4cf63;color:#744606;font-weight:950;box-shadow:0 8px 18px #0008,0 0 18px #f5c84b35;pointer-events:none}
       .reward-v4-coin.c1{width:40px;height:40px;right:12px;top:15px;font-size:17px;transform:rotate(13deg)}
       .reward-v4-coin.c2{width:29px;height:29px;right:105px;top:27px;font-size:12px;transform:rotate(-17deg)}
       .reward-v4-coin.c3{width:24px;height:24px;right:73px;top:91px;font-size:10px;transform:rotate(21deg)}
-      .reward-v4-copy{position:relative;z-index:3;max-width:62%}
+      .reward-v4-copy{position:relative;z-index:4;max-width:62%}
       .reward-v4-kicker{display:inline-flex;align-items:center;min-height:25px;padding:4px 9px;border:1px solid #8f5a1d;border-radius:999px;background:#29120d;color:#f3c95a;font-size:8.5px;font-weight:900;letter-spacing:.06em}
       .reward-v4-copy h2{margin:10px 0 7px;font-size:29px;line-height:.98;letter-spacing:-1.1px;color:#fff4dc}
       .reward-v4-copy p{margin:0;color:#d8c4b4;font-size:10px;line-height:1.45}
       .reward-v4-explore{margin-top:14px;min-height:38px;border:0;border-radius:999px;padding:0 14px;background:linear-gradient(180deg,#ffe47b,#eeb338);color:#1e1404;font-size:9.5px;font-weight:900}
-      .reward-v4-wallet{position:absolute;z-index:3;right:14px;bottom:15px;width:145px;padding:12px;border:1px solid #8f6a28;border-radius:15px;background:linear-gradient(145deg,#34231a,#171414);box-shadow:0 12px 25px #0006}
+      .reward-v4-wallet{position:absolute;z-index:4;right:14px;bottom:15px;width:145px;padding:12px;border:1px solid #8f6a28;border-radius:15px;background:linear-gradient(145deg,#34231a,#171414);box-shadow:0 12px 25px #0006}
       .reward-v4-wallet small{display:block;color:#bfb2a5;font-size:8px}.reward-v4-wallet b{display:block;margin-top:5px;color:#ffd75d;font-size:18px}.reward-v4-wallet span{display:block;margin-top:4px;color:#888177;font-size:7.8px}
       .reward-v4-news{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center;width:100%;min-height:40px;padding:0 11px;border:1px solid #4a2f30;border-radius:12px;background:#0e1013;text-align:left;box-sizing:border-box;overflow:hidden}
-      .reward-v4-news strong{display:flex;align-items:center;gap:5px;min-width:0;font-size:8.5px;line-height:1.2;color:#f3c957;white-space:nowrap}.reward-v4-news strong i{width:5px;height:5px;flex:none;border-radius:50%;background:#e8514d;box-shadow:0 0 0 3px #e8514d22}.reward-v4-news span{min-width:0;font-size:8.8px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.reward-v4-news em{flex:none;padding-left:3px;font-size:7.8px;line-height:1.2;color:#858a92;font-style:normal;white-space:nowrap}
+      .reward-v4-news strong{display:flex;align-items:center;gap:5px;min-width:0;font-size:8.5px;line-height:1.2;color:#f3c957;white-space:nowrap}.reward-v4-news strong i{width:5px;height:5px;flex:none;border-radius:50%;background:#e8514d;box-shadow:0 0 0 3px #e8514d22}.reward-v4-news span{min-width:0;color:#e7e3dc;font-size:8.8px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.reward-v4-news em{flex:none;padding-left:3px;font-size:7.8px;line-height:1.2;color:#858a92;font-style:normal;white-space:nowrap}
       .reward-v4-wheel-card{display:grid;grid-template-columns:205px minmax(0,1fr);gap:11px;align-items:center;min-width:0;padding:13px;border:1px solid #3f2f28;border-radius:16px;background:linear-gradient(145deg,#140f0d,#0b0d10);box-sizing:border-box}
       .reward-v4-wheel-wrap{position:relative;width:195px;height:195px;margin:auto}
       .reward-v4-pointer{position:absolute;z-index:8;left:50%;top:-3px;transform:translateX(-50%);width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;border-top:20px solid #ffd75d;filter:drop-shadow(0 2px 3px #000)}
@@ -143,9 +142,9 @@
       <button class="reward-v4-news" id="rewardV4News" type="button"><strong><i aria-hidden="true"></i>LIVE BONUS NEWS</strong><span id="rewardV4NewsText">Loading campaigns…</span><em id="rewardV4NewsState">Waiting</em></button>
       <section class="reward-v4-wheel-card">
         <div class="reward-v4-wheel-wrap"><div class="reward-v4-pointer"></div><div class="reward-v4-wheel" id="rewardV4Wheel"></div></div>
-        <div class="reward-v4-wheel-copy"><span class="reward-v4-kicker">DAILY SPIN</span><h3>Golden Daily Wheel</h3><p>One server-controlled spin per eligible day. The result is selected by the backend, then the wheel animates to that reward.</p><div class="reward-v4-spin-status"><b id="rewardV4SpinTitle">Loading…</b><small id="rewardV4SpinNote">Checking availability</small><button class="reward-v4-spin" id="rewardV4Spin" type="button">Spin Now</button></div></div>
+        <div class="reward-v4-wheel-copy"><span class="reward-v4-kicker">DAILY SPIN</span><h3>Golden Daily Wheel</h3><p>One eligible spin per day. Your reward is selected securely by the server.</p><div class="reward-v4-spin-status"><b id="rewardV4SpinTitle">Loading…</b><small id="rewardV4SpinNote">Checking availability</small><button class="reward-v4-spin" id="rewardV4Spin" type="button">Spin Now</button></div></div>
       </section>
-      <section class="reward-v4-zone"><div class="reward-v4-section-head"><h3>Reward Zone</h3><button id="rewardV4More" type="button">More Rewards ›</button></div><div class="reward-v4-zone-grid">
+      <section class="reward-v4-zone"><div class="reward-v4-section-head"><h3>Reward Zone</h3><button id="rewardV4More" type="button">Reward History ›</button></div><div class="reward-v4-zone-grid">
         <button class="reward-v4-zone-card" data-zone="newuser" type="button"><span class="reward-v4-zone-icon">🎁</span><b>New User Bonus</b><small>Get started & earn USDT</small></button>
         <button class="reward-v4-zone-card" data-zone="invite" type="button"><span class="reward-v4-zone-icon">👥</span><b>Invite & Earn</b><small>Share and earn together</small></button>
         <button class="reward-v4-zone-card" data-zone="tasks" type="button"><span class="reward-v4-zone-icon">✓</span><b>Complete Tasks</b><small>Campaign rewards</small></button>
@@ -187,14 +186,14 @@
     const wheel = $('rewardV4Wheel'); if (!wheel) return;
     wheel.querySelectorAll('.reward-v4-wheel-label').forEach(node => node.remove());
     const segments = model.wheel?.segments || [];
-    const count = Math.max(8, segments.length || 8);
-    for (let i = 0; i < 8; i++) {
+    if (!segments.length) return;
+    for (let i = 0; i < Math.min(8, segments.length); i++) {
       const segment = segments[i];
       const label = document.createElement('span');
       label.className = 'reward-v4-wheel-label';
       const angle = i * 45 + 22.5;
       label.style.transform = `rotate(${angle}deg) translateY(-68px) rotate(${-angle}deg)`;
-      label.textContent = segment ? `${num(segment.rewardAmount)}₮` : '—';
+      label.textContent = `${num(segment.rewardAmount)}₮`;
       wheel.appendChild(label);
     }
   }
@@ -241,9 +240,9 @@
     if (!button) return;
     const can = !!wheel?.enabled && !!wheel?.canSpin && !spinning;
     button.disabled = !can;
-    button.textContent = spinning ? 'Spinning…' : can ? 'Spin Now →' : 'Used Today';
-    if ($('rewardV4SpinTitle')) $('rewardV4SpinTitle').textContent = !wheel?.enabled ? 'Daily wheel disabled' : wheel.canSpin ? 'Ready to Spin' : wheel.previousResult ? `Today: ${num(wheel.previousResult.rewardAmount)} USDT` : 'Used Today';
-    if ($('rewardV4SpinNote')) $('rewardV4SpinNote').textContent = wheel?.canSpin ? '1 spin available today' : wheel?.nextEligibleAt ? `Next ${new Date(wheel.nextEligibleAt).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}` : 'Come back later';
+    button.textContent = spinning ? 'Spinning…' : can ? 'Spin Now →' : !wheel?.enabled ? 'Unavailable' : 'Used Today';
+    if ($('rewardV4SpinTitle')) $('rewardV4SpinTitle').textContent = !wheel?.enabled ? 'Daily wheel unavailable' : wheel.canSpin ? 'Ready to Spin' : wheel.previousResult ? `Today: ${num(wheel.previousResult.rewardAmount)} USDT` : 'Used Today';
+    if ($('rewardV4SpinNote')) $('rewardV4SpinNote').textContent = !wheel?.enabled ? 'This reward is not active right now.' : wheel?.canSpin ? '1 spin available today' : wheel?.nextEligibleAt ? `Next ${new Date(wheel.nextEligibleAt).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}` : 'Come back later';
   }
 
   function renderTasks() {
