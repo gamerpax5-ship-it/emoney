@@ -133,20 +133,24 @@
     }[ch]));
   }
 
+  function setTextIfChanged(node, value) {
+    if (node && node.textContent !== value) node.textContent = value;
+  }
+
   function refreshSummary(order) {
     const plan = document.querySelector('.digi-v6-bank-plan');
     if (!plan || !order) return;
     const ds = draftState(order);
     const boxes = plan.querySelectorAll('.digi-v6-plan-summary > div b');
-    if (boxes[0]) boxes[0].textContent = inr(ds.total);
-    if (boxes[1]) boxes[1].textContent = inr(ds.allocated);
-    if (boxes[2]) boxes[2].textContent = inr(ds.pending);
+    setTextIfChanged(boxes[0], inr(ds.total));
+    setTextIfChanged(boxes[1], inr(ds.allocated));
+    setTextIfChanged(boxes[2], inr(ds.pending));
     const note = plan.querySelector('.digi-v6-plan-footer small');
-    if (note) note.textContent = ds.error || 'Enter any amount per bank. The remaining INR can stay pending.';
+    setTextIfChanged(note, ds.error || 'Enter any amount per bank. The remaining INR can stay pending.');
     const save = plan.querySelector('#digiV6SaveBankPlan');
     if (save) {
       save.disabled = !!ds.error || state.saving;
-      if (!state.saving) save.textContent = 'Save';
+      if (!state.saving) setTextIfChanged(save, 'Save');
     }
   }
 
