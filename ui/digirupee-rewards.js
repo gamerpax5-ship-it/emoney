@@ -40,10 +40,10 @@
     const style = document.createElement('style');
     style.id = 'digi-rewards-v4-css';
     style.textContent = `
-      #rewards.reward-v4-ready{padding-bottom:18px!important;background:#050607!important}
+      #rewards.reward-v4-ready{padding:0 0 calc(18px + var(--digi-safe-bottom,0px))!important;background:#050607!important;box-sizing:border-box}
       #rewards.reward-v4-ready>*:not(.reward-v4-root){display:none!important}
-      .reward-v4-root{display:flex;flex-direction:column;gap:10px;color:#f8f2e8}
-      .reward-v4-hero{position:relative;overflow:hidden;min-height:205px;border:1px solid #7a3a20;border-radius:20px;padding:18px;background:
+      .reward-v4-root{display:flex;flex-direction:column;gap:8px;padding-top:2px;color:#f8f2e8}
+      .reward-v4-hero{position:relative;overflow:hidden;min-height:195px;border:1px solid #7a3a20;border-radius:18px;padding:15px;background:
         radial-gradient(circle at 80% 28%,rgba(255,201,71,.28),transparent 18%),
         radial-gradient(circle at 78% 76%,rgba(235,73,52,.26),transparent 28%),
         linear-gradient(135deg,#4c0b0b 0%,#230809 56%,#0d0a0a 100%);
@@ -58,9 +58,9 @@
       .reward-v4-explore{margin-top:14px;min-height:38px;border:0;border-radius:999px;padding:0 14px;background:linear-gradient(180deg,#ffe47b,#eeb338);color:#1e1404;font-size:9.5px;font-weight:900}
       .reward-v4-wallet{position:absolute;z-index:3;right:14px;bottom:15px;width:145px;padding:12px;border:1px solid #8f6a28;border-radius:15px;background:linear-gradient(145deg,#34231a,#171414);box-shadow:0 12px 25px #0006}
       .reward-v4-wallet small{display:block;color:#bfb2a5;font-size:8px}.reward-v4-wallet b{display:block;margin-top:5px;color:#ffd75d;font-size:18px}.reward-v4-wallet span{display:block;margin-top:4px;color:#888177;font-size:7.8px}
-      .reward-v4-news{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:9px;align-items:center;min-height:42px;padding:0 12px;border:1px solid #4a2f30;border-radius:13px;background:#0e1013}
-      .reward-v4-news strong{font-size:9px;color:#f3c957}.reward-v4-news span{min-width:0;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.reward-v4-news em{font-size:8px;color:#858a92;font-style:normal}
-      .reward-v4-wheel-card{display:grid;grid-template-columns:205px minmax(0,1fr);gap:13px;align-items:center;padding:15px;border:1px solid #3f2f28;border-radius:17px;background:linear-gradient(145deg,#140f0d,#0b0d10)}
+      .reward-v4-news{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center;width:100%;min-height:40px;padding:0 11px;border:1px solid #4a2f30;border-radius:12px;background:#0e1013;text-align:left;box-sizing:border-box;overflow:hidden}
+      .reward-v4-news strong{display:flex;align-items:center;gap:5px;min-width:0;font-size:8.5px;line-height:1.2;color:#f3c957;white-space:nowrap}.reward-v4-news strong i{width:5px;height:5px;flex:none;border-radius:50%;background:#e8514d;box-shadow:0 0 0 3px #e8514d22}.reward-v4-news span{min-width:0;font-size:8.8px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.reward-v4-news em{flex:none;padding-left:3px;font-size:7.8px;line-height:1.2;color:#858a92;font-style:normal;white-space:nowrap}
+      .reward-v4-wheel-card{display:grid;grid-template-columns:205px minmax(0,1fr);gap:11px;align-items:center;min-width:0;padding:13px;border:1px solid #3f2f28;border-radius:16px;background:linear-gradient(145deg,#140f0d,#0b0d10);box-sizing:border-box}
       .reward-v4-wheel-wrap{position:relative;width:195px;height:195px;margin:auto}
       .reward-v4-pointer{position:absolute;z-index:8;left:50%;top:-3px;transform:translateX(-50%);width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;border-top:20px solid #ffd75d;filter:drop-shadow(0 2px 3px #000)}
       .reward-v4-wheel{position:absolute;inset:5px;border-radius:50%;border:7px solid #d9a72f;background:conic-gradient(#b31e2c 0 45deg,#f7dd89 45deg 90deg,#a91524 90deg 135deg,#efd17c 135deg 180deg,#b31e2c 180deg 225deg,#f7dd89 225deg 270deg,#a91524 270deg 315deg,#efd17c 315deg 360deg);box-shadow:0 0 0 4px #6f4514,0 0 22px #d19b2838;transition:transform 4.6s cubic-bezier(.12,.96,.16,1)}
@@ -69,7 +69,7 @@
       .reward-v4-wheel-copy h3{margin:0;font-size:20px}.reward-v4-wheel-copy p{margin:7px 0 0;color:#aaa39b;font-size:9.5px;line-height:1.45}
       .reward-v4-spin-status{margin-top:12px;padding:10px;border:1px solid #292d35;border-radius:12px;background:#111419}.reward-v4-spin-status b{display:block;font-size:11px}.reward-v4-spin-status small{display:block;margin-top:4px;color:#8d929a;font-size:8.5px;line-height:1.4}
       .reward-v4-spin{width:100%;min-height:40px;margin-top:9px;border:0;border-radius:999px;background:linear-gradient(180deg,#ffe47d,#eeb43d);color:#1b1305;font-size:10px;font-weight:950}.reward-v4-spin:disabled{background:#41391f;color:#a8996a}
-      .reward-v4-zone{padding:2px 0}.reward-v4-section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:4px 2px 8px}.reward-v4-section-head h3{margin:0;color:#f1cf67;font-size:15px}.reward-v4-section-head button{border:0;background:none;color:#92969d;font-size:9px}
+      .reward-v4-zone{padding:2px 0}.reward-v4-section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:3px 2px 7px}.reward-v4-section-head h3{margin:0;color:#f1cf67;font-size:14px;line-height:1.2}.reward-v4-section-head button{border:0;background:none;color:#92969d;font-size:8.5px;white-space:nowrap}
       .reward-v4-zone-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
       .reward-v4-zone-card{min-height:100px;padding:10px 7px;border:1px solid #302d2b;border-radius:12px;background:#0d0f12;text-align:center;color:#fff}
       .reward-v4-zone-icon{width:34px;height:34px;margin:0 auto 7px;border-radius:10px;display:grid;place-items:center;background:linear-gradient(145deg,#39250d,#d29a24);font-size:17px}
@@ -116,7 +116,7 @@
         <div class="reward-v4-copy"><span class="reward-v4-kicker">BONUS ZONE</span><h2>Play More.<br>Earn More.</h2><p>Daily rewards, referrals and campaign tasks—powered by your real account activity.</p><button class="reward-v4-explore" id="rewardV4Explore" type="button">Explore Rewards →</button></div>
         <button class="reward-v4-wallet" id="rewardV4Wallet" type="button"><small>My Rewards</small><b id="rewardV4Balance">0 USDT</b><span>View reward history ›</span></button>
       </section>
-      <button class="reward-v4-news" id="rewardV4News" type="button"><strong>● LIVE BONUS NEWS</strong><span id="rewardV4NewsText">Loading campaigns…</span><em id="rewardV4NewsState">Waiting</em></button>
+      <button class="reward-v4-news" id="rewardV4News" type="button"><strong><i aria-hidden="true"></i>LIVE BONUS NEWS</strong><span id="rewardV4NewsText">Loading campaigns…</span><em id="rewardV4NewsState">Waiting</em></button>
       <section class="reward-v4-wheel-card">
         <div class="reward-v4-wheel-wrap"><div class="reward-v4-pointer"></div><div class="reward-v4-wheel" id="rewardV4Wheel"></div></div>
         <div class="reward-v4-wheel-copy"><span class="reward-v4-kicker">DAILY SPIN</span><h3>Golden Daily Wheel</h3><p>One server-controlled spin per eligible day. The result is selected by the backend, then the wheel animates to that reward.</p><div class="reward-v4-spin-status"><b id="rewardV4SpinTitle">Loading…</b><small id="rewardV4SpinNote">Checking availability</small><button class="reward-v4-spin" id="rewardV4Spin" type="button">Spin Now</button></div></div>
