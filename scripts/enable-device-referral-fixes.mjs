@@ -11,7 +11,7 @@ const runtimePath = join(root, 'website/server-runtime.mjs');
 await copyFile(canonicalJs, hostedJs);
 
 let html = await readFile(htmlPath, 'utf8');
-const scriptTag = '<script src="/digirupee-device-fixes.js?v=20260916c" defer></script>';
+const scriptTag = '<script src="/digirupee-device-fixes.js?v=20260916d" defer></script>';
 if (/\/digirupee-device-fixes\.js(?:\?v=[^"']+)?/.test(html)) {
   html = html.replace(/<script src="\/digirupee-device-fixes\.js(?:\?v=[^"']+)?" defer><\/script>/, scriptTag);
 } else {
@@ -31,4 +31,5 @@ if (!runtime.includes("'/digirupee-device-fixes.js'")) {
   await writeFile(runtimePath, runtime, 'utf8');
 }
 
-console.log('Enabled digiRupee clean responsive UI and referral handoff');
+await import('./enable-live-reward-tasks.mjs');
+console.log('Enabled digiRupee clean responsive UI, referral handoff and live reward tasks');
