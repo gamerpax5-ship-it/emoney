@@ -11,10 +11,13 @@ const runtimePath = join(root, 'website/server-runtime.mjs');
 await copyFile(canonicalJs, hostedJs);
 
 let html = await readFile(htmlPath, 'utf8');
-if (!html.includes('/digirupee-device-fixes.js')) {
-  html = html.replace(/<\/body>/i, '<script src="/digirupee-device-fixes.js?v=20260916a" defer></script></body>');
-  await writeFile(htmlPath, html, 'utf8');
+const scriptTag = '<script src="/digirupee-device-fixes.js?v=20260916c" defer></script>';
+if (/\/digirupee-device-fixes\.js(?:\?v=[^"']+)?/.test(html)) {
+  html = html.replace(/<script src="\/digirupee-device-fixes\.js(?:\?v=[^"']+)?" defer><\/script>/, scriptTag);
+} else {
+  html = html.replace(/<\/body>/i, `${scriptTag}</body>`);
 }
+await writeFile(htmlPath, html, 'utf8');
 
 let runtime = await readFile(runtimePath, 'utf8');
 if (!runtime.includes("'/digirupee-device-fixes.js'")) {
@@ -28,4 +31,4 @@ if (!runtime.includes("'/digirupee-device-fixes.js'")) {
   await writeFile(runtimePath, runtime, 'utf8');
 }
 
-console.log('Enabled digiRupee fixed typography, responsive home layout and referral UI handoff');
+console.log('Enabled digiRupee clean responsive UI and referral handoff');
