@@ -724,6 +724,12 @@
     document.body.classList.remove('digi-layout-v3','digi-layout-v4','digi-layout-v5','digi-layout-v6');
     document.body.classList.add('digi-layout-v61');
 
+    // digiRupee 1.0.4 and earlier can render edge-to-edge on devices where
+    // the native WebView does not reliably consume the status-bar inset.
+    // Keep the old installed APK usable by applying a hosted-UI fallback.
+    const legacyApk = /digiRupee\/1\.0\.[0-4]\b/i.test(navigator.userAgent || '');
+    document.body.classList.toggle('digi-legacy-insets', legacyApk);
+
     if (typeof window.__digiStateSnapshot === 'function') {
       loadState(window.__digiStateSnapshot());
     }
