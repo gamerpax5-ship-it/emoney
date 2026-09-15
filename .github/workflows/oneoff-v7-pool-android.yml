@@ -91,6 +91,7 @@ jobs:
           git diff --cached --check
           git diff --cached --quiet && { echo "No validated changes to commit"; exit 1; } || true
           git commit -m "Optimize digiRupee address pool and Android safe insets"
+          git stash push -u -m generated-validation || true
           git pull --rebase origin main
           git push origin HEAD:main
 
