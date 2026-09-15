@@ -123,15 +123,13 @@ if (persistenceEnabled) {
   console.warn('Supabase persistence is not configured; runtime data is ephemeral.');
 }
 
-await import('./server.mjs');
+await import('./server-runtime.mjs');
 
 if (persistenceEnabled) {
   if (String(process.env.AUDIT_REPAIR_ON_BOOT || '').toLowerCase() === 'true') {
     try {
       await persistState();
     } catch (error) {
-      // A remote persistence outage or an unapplied migration must not take the
-      // web/API process down after it has already started successfully.
       console.error('Initial persistence sync failed:', error.message);
     }
   }
