@@ -79,7 +79,7 @@ test('digiRupee cycles three TRON addresses after confirmed deposits and sends t
       const count = (accountPollCount.get(address) || 0) + 1;
       accountPollCount.set(address, count);
       const txId = createHash('sha256').update(`${address}:${count}`).digest('hex');
-      const timestamp = Date.now() - 500;
+      const timestamp = Date.now();
       txRecords.set(txId, { address, timestamp });
       res.end(JSON.stringify({
         data: [{
