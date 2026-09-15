@@ -37,7 +37,9 @@
     style.id = 'digirupee-layout-v61-css';
     style.textContent = `
       html,body{height:100%;min-height:100%;overflow:hidden;background:#000!important}
-      body.digi-layout-v61{--digi-safe-top:env(safe-area-inset-top,0px);--digi-safe-bottom:env(safe-area-inset-bottom,0px)}
+      /* The Android shell already positions the WebView below the status bar.
+         Keep the hosted layout from applying the same top inset a second time. */
+      body.digi-layout-v61{--digi-safe-top:0px;--digi-safe-bottom:env(safe-area-inset-bottom,0px)}
       body.digi-layout-v61 #sell>*:not(#v61root){display:none!important}
       body.digi-layout-v61 .statusbar{display:none!important}
       body.digi-layout-v61.digi-legacy-insets{--digi-safe-top:max(28px,env(safe-area-inset-top,0px))}
