@@ -1,0 +1,70 @@
+name: One-off run all boot migrations
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/oneoff-run-all-boot-migrations.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Fix boot migration short circuit
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('website/server.mjs')
+          s = p.read_text(encoding='utf-8')
+          old = "if (ensureDigiReferralCodes() || ensureDigiAddressAssignments() || ensureDigiSecurityFields() || ensureDigiSessionFields()) await persist();"
+          new = """const digiBootStateChanged = [
+            ensureDigiReferralCodes(),
+            ensureDigiAddressAssignments(),
+            ensureDigiSecurityFields(),
+            ensureDigiSessionFields()
+          ].some(Boolean);
+          if (digiBootStateChanged) await persist();"""
+          if s.count(old) != 1:
+              raise SystemExit(f'boot migration expression match count: {s.count(old)}')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Validate server and three-address integration
+        run: |
+          node --check website/server.mjs
+          node - <<'NODE'
+          const fs = require('fs');
+          const s = fs.readFileSync('website/server.mjs','utf8');
+          for (const marker of [
+            'const digiBootStateChanged = [',
+            'ensureDigiAddressAssignments(),',
+            'TRON_EXPIRED_ADDRESS_REUSE_MS',
+            'candidate.receivedUsdtMicros, candidate.txId'
+          ]) if (!s.includes(marker)) throw new Error(`missing ${marker}`);
+          if (s.includes('ensureDigiReferralCodes() || ensureDigiAddressAssignments()')) throw new Error('boot migration short circuit still present');
+          NODE
+          node --test tests/digirupee-pool-flow.test.mjs
+
+      - name: Commit validated fix and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm .github/workflows/oneoff-run-all-boot-migrations.yml
+          git add website/server.mjs
+          git add -u .github/workflows/oneoff-run-all-boot-migrations.yml
+          git diff --cached --check
+          git commit -m "Run all digiRupee boot migrations"
+          git push origin main
