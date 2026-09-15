@@ -1,0 +1,51 @@
+name: Validate digiRupee auth UI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/oneoff-auth-ui-v2.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply patch
+        run: python3 scripts/oneoff-auth-ui-v2.py
+      - name: Validate
+        run: |
+          node --check ui/digirupee-app.js
+          npm run prepare-assets
+          node --check website/digirupee-app.js
+          cmp -s ui/digirupee-app.js website/digirupee-app.js
+          node --test tests/digirupee-pool-flow.test.mjs
+          git diff --check
+          grep -q 'New user?' ui/digirupee-app.js
+          grep -q '#26A17B' ui/digirupee-app.js
+          grep -q "api('/auth/register'" ui/digirupee-app.js
+          grep -q "api('/auth/login'" ui/digirupee-app.js
+          grep -q "api('/auth/2fa'" ui/digirupee-app.js
+      - name: Keep canonical source only
+        run: |
+          git restore website/digirupee-app.html website/digirupee-app.js website/digirupee-qr.js website/digirupee-rewards.js website/digirupee-rewards-assets.js website/digirupee-layout-v3.js android/app/src/main/assets/offline.html 2>/dev/null || true
+          git diff --check
+          test "$(git diff --name-only)" = "ui/digirupee-app.js"
+      - name: Commit validated UI and clean temp files
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ui/digirupee-app.js
+          git rm .github/workflows/oneoff-auth-ui-v2.yml scripts/oneoff-auth-ui-v2.py
+          git commit -m 'Apply premium digiRupee login and registration UI'
+          git push origin HEAD:main
