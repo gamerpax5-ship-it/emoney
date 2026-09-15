@@ -84,7 +84,7 @@ public class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " digiRupee/1.0.8");
+        settings.setUserAgentString(settings.getUserAgentString() + " digiRupee/1.0.9");
         webView.addJavascriptInterface(new DigiAndroidBridge(), "DigiAndroid");
 
         CookieManager cookieManager = CookieManager.getInstance();
@@ -257,6 +257,11 @@ public class MainActivity extends Activity {
         webView.loadDataWithBaseURL(LOCAL_OFFLINE_URL, html, "text/html", "UTF-8", null);
     }
 
+    private void fallbackBack() {
+        if (webView != null && webView.canGoBack()) webView.goBack();
+        else super.onBackPressed();
+    }
+
     @Override protected void onSaveInstanceState(Bundle outState) { webView.saveState(outState); super.onSaveInstanceState(outState); }
 
     @Override
@@ -271,8 +276,17 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (showingOfflinePage) loadWebApp();
-        else if (webView != null && webView.canGoBack()) webView.goBack();
-        else super.onBackPressed();
+        if (showingOfflinePage) {
+            loadWebApp();
+            return;
+        }
+        if (webView == null) {
+            super.onBackPressed();
+            return;
+        }
+        webView.evaluateJavascript("(function(){try{return !!(window.__digiHandleBack&&window.__digiHandleBack());}catch(e){return false;}})()", value -> {
+            if ("true".equalsIgnoreCase(String.valueOf(value))) return;
+            fallbackBack();
+        });
     }
 }
