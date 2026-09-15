@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'scripts/oneoff-v7-pool-android.mjs'
+      - 'tests/digirupee-pool-flow.test.mjs'
 
 permissions:
   contents: write
@@ -25,6 +26,9 @@ jobs:
 
       - name: Apply reviewed V7 patch
         run: node scripts/oneoff-v7-pool-android.mjs
+
+      - name: Restore reviewed integration test
+        run: git checkout HEAD -- tests/digirupee-pool-flow.test.mjs
 
       - name: Syntax checks
         run: |
