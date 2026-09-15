@@ -23,10 +23,16 @@ const sessionSecret = String(process.env.SESSION_SECRET || randomBytes(48).toStr
 const sessionMaxAge = 60 * 60 * 24 * 7;
 const adminSessionMaxAge = 60 * 60 * 12;
 const production = process.env.NODE_ENV === 'production';
-const configuredOrigins = String(process.env.PUBLIC_ORIGIN || '')
+const configuredOrigins = [...new Set([
+  ...(production ? ['https://loktron.com'] : []),
+  ...String(process.env.PUBLIC_ORIGIN || '')
   .split(',')
   .map(v => v.trim().replace(/\/$/, ''))
-  .filter(Boolean);
+  .filter(Boolean)
+])];
+const supabaseUrl = String(process.env.SUPABASE_URL || process.env.LOKTRON_SUPABASE_URL || '').replace(/\/$/, '');
+const supabaseSecretKey = String(process.env.SUPABASE_SECRET_KEY || process.env.LOKTRON_SUPABASE_KEY || '');
+const persistenceSecret = String(process.env.LOKTRON_PERSISTENCE_SECRET || '');
 const tronApiUrl = String(process.env.TRON_API_URL || 'https://api.trongrid.io').replace(/\/$/, '');
 const tronApiKey = String(process.env.TRONGRID_API_KEY || '');
 const tronUsdtContract = String(process.env.TRON_USDT_CONTRACT || 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj');
@@ -127,28 +133,14 @@ const defaultData = {
       transferTypes: 'IMPS / NEFT / RTGS'
     }
   },
-  users: [{
-    id: 'usr_demo',
-    email: 'demo@loktron.com',
-    passwordHash: legacyHash('12345678'),
-    name: 'Demo User',
-    mobile: '+91 98765 43210',
-    currency: 'INR',
-    wallet: '',
-    createdAt: Date.now()
-  }],
+  users: [],
   orders: [],
   bankLedger: [],
   tickets: [],
   auditLog: [],
   adminSessions: [],
-  notifications: [{
-    id: 'n1',
-    userId: 'usr_demo',
-    title: 'Welcome to LOKTRON',
-    text: 'Save your USDT wallet address before creating your first Buy order.',
-    time: 'Today'
-  }],
+  notifications: [],
+  legacyRevokedSessions: [],
   // digiRupee/WTRON has its own state namespace. It intentionally starts
   // without demo users, payout methods, orders, rewards, or notifications.
   digirupee: {
@@ -242,6 +234,7 @@ async function loadDb() {
       bankLedger: Array.isArray(parsed.bankLedger) ? parsed.bankLedger : [],
       tickets: Array.isArray(parsed.tickets) ? parsed.tickets : [],
       notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
+      legacyRevokedSessions: Array.isArray(parsed.legacyRevokedSessions) ? parsed.legacyRevokedSessions : [],
       auditLog: Array.isArray(parsed.auditLog) ? parsed.auditLog : [],
       adminSessions: Array.isArray(parsed.adminSessions) ? parsed.adminSessions : [],
       digirupee: {
@@ -324,6 +317,9 @@ function send(res, status, data, extra = {}) {
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
+    'X-Frame-Options': 'SAMEORIGIN',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+    ...(production ? { 'Strict-Transport-Security': 'max-age=31536000; includeSubDomains' } : {}),
     ...extra
   });
   res.end(JSON.stringify(data));
@@ -443,10 +439,22 @@ function verifySession(token) {
     if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return '';
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
     if (!data.uid || Number(data.exp) < Date.now()) return '';
+    const tokenHash = createHash('sha256').update(String(token)).digest('hex');
+    if ((db.legacyRevokedSessions || []).some(item => item.tokenHash === tokenHash && Number(item.expiresAt) > Date.now())) return '';
     return String(data.uid);
   } catch {
     return '';
   }
+}
+
+function revokeLegacySession(token) {
+  if (!token) return false;
+  const now = Date.now();
+  const tokenHash = createHash('sha256').update(String(token)).digest('hex');
+  db.legacyRevokedSessions = (db.legacyRevokedSessions || [])
+    .filter(item => Number(item.expiresAt) > now && item.tokenHash !== tokenHash);
+  db.legacyRevokedSessions.push({ tokenHash, expiresAt: now + sessionMaxAge * 1000, revokedAt: now });
+  return true;
 }
 
 function sessionToken(req) {
@@ -455,7 +463,7 @@ function sessionToken(req) {
 
 function sessionCookie(req, token, maxAge = sessionMaxAge) {
   const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
-  const secure = forwardedProto === 'https' ? '; Secure' : '';
+  const secure = production || forwardedProto === 'https' ? '; Secure' : '';
   return `loktron_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
 }
 
@@ -502,8 +510,23 @@ function verifyDigiSession(token) {
 
 function digiSessionCookie(req, token, maxAge = sessionMaxAge) {
   const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
-  const secure = forwardedProto === 'https' ? '; Secure' : '';
+  const secure = production || forwardedProto === 'https' ? '; Secure' : '';
   return `${digiSessionCookieName}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
+}
+
+const adminSessionCookieName = 'loktron_admin_session';
+function adminSessionToken(req) {
+  return readCookies(req)[adminSessionCookieName] || bearer(req);
+}
+
+function adminSessionCookie(req, token, maxAge = adminSessionMaxAge) {
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  const secure = production || forwardedProto === 'https' ? '; Secure' : '';
+  return `${adminSessionCookieName}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`;
+}
+
+function clearAdminSessionCookie(req) {
+  return adminSessionCookie(req, '', 0);
 }
 
 function clearDigiSessionCookie(req) {
@@ -2006,7 +2029,7 @@ function auth(req) {
 }
 
 function adminAuth(req) {
-  const token = bearer(req);
+  const token = adminSessionToken(req);
   const admin = verifyAdminSession(token);
   if (!admin) {
     throw Object.assign(new Error('Admin authentication required'), { status: 401 });
@@ -2143,14 +2166,14 @@ function parseAdminUsers() {
         passwordHash: String(item.passwordHash || ''),
         role: ['owner', 'ops', 'support'].includes(String(item.role || 'ops')) ? String(item.role || 'ops') : 'ops',
         mfaCode: String(item.mfaCode || '')
-      })).filter(item => safeEmail(item.email) && (item.password || item.passwordHash || (!production && index === 0)));
+      })).filter(item => safeEmail(item.email) && (item.password || item.passwordHash));
     } catch (error) {
       console.error('ADMIN_USERS is invalid JSON:', error.message);
       return [];
     }
   }
-  const email = String(process.env.ADMIN_EMAIL || (production ? '' : 'admin@loktron.local')).trim().toLowerCase();
-  const password = String(process.env.ADMIN_PASSWORD || (production ? '' : 'ChangeMe-LOKTRON-2026'));
+  const email = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+  const password = String(process.env.ADMIN_PASSWORD || '');
   const passwordHash = String(process.env.ADMIN_PASSWORD_HASH || '');
   if (!safeEmail(email) || (!password && !passwordHash)) return [];
   return [{
@@ -2406,8 +2429,9 @@ function headers(type) {
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'X-Frame-Options': 'SAMEORIGIN',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+    ...(production ? { 'Strict-Transport-Security': 'max-age=31536000; includeSubDomains' } : {}),
     'Cache-Control': type.startsWith('image/') ? 'public, max-age=86400' : 'no-cache',
-    'Content-Security-Policy': "default-src 'self' data: blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'self'"
+    'Content-Security-Policy': "default-src 'self' data: blob:; base-uri 'self'; object-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'self'"
   };
 }
 
@@ -4022,16 +4046,16 @@ async function api(req, res, path) {
     appendAudit({ actorType: 'admin', actorId: email, action: 'admin.login', entityType: 'session', entityId: email, details: { role: admin.role, mfa: !!admin.mfaCode } });
     const token = makeAdminSession(admin);
     await persist();
-    return send(res, 200, { token, expiresIn: adminSessionMaxAge, admin: { email: admin.email, role: admin.role, mfaEnabled: !!admin.mfaCode } });
+    return send(res, 200, { token, expiresIn: adminSessionMaxAge, admin: { email: admin.email, role: admin.role, mfaEnabled: !!admin.mfaCode } }, { 'Set-Cookie': adminSessionCookie(req, token) });
   }
 
   if (req.method === 'POST' && path === '/admin/logout') {
-    const token = bearer(req);
+    const token = adminSessionToken(req);
     const admin = adminAuth(req);
     revokeAdminSession(token);
     appendAudit({ actorType: 'admin', actorId: admin.email, action: 'admin.logout', entityType: 'session', entityId: admin.email });
     await persist();
-    return send(res, 200, { ok: true });
+    return send(res, 200, { ok: true }, { 'Set-Cookie': clearAdminSessionCookie(req) });
   }
 
   if (req.method === 'GET' && path === '/admin/overview') {
@@ -4290,6 +4314,11 @@ async function api(req, res, path) {
   }
 
   if (req.method === 'POST' && path === '/auth/logout') {
+    const token = sessionToken(req);
+    if (token) {
+      revokeLegacySession(token);
+      await persist();
+    }
     return send(res, 200, { ok: true }, { 'Set-Cookie': clearSessionCookie(req) });
   }
 
@@ -4449,7 +4478,7 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
     if (url.pathname === '/health' || url.pathname === '/ready') {
-      const persistenceConfigured = !!(process.env.LOKTRON_SUPABASE_URL && process.env.LOKTRON_SUPABASE_KEY && process.env.LOKTRON_PERSISTENCE_SECRET);
+      const persistenceConfigured = !!(supabaseUrl && supabaseSecretKey && persistenceSecret);
       const chainConfigurationReady = tronVerifyMode === 'required' && !!tronApiKey && isValidTronAddress(tronUsdtContract);
       const ready = auditHealthy() && (!production || (!!process.env.SESSION_SECRET && adminConfigured && persistenceConfigured && chainConfigurationReady));
       const strict = url.pathname === '/ready';
@@ -4489,12 +4518,26 @@ const server = http.createServer(async (req, res) => {
     }
 
     const pathname = decodeURIComponent(url.pathname);
+    if (/^(?:\/runtime-data\.json|\/\.env(?:\.|$)|\/.*(?:\.tmp|\.bak)$|\/server\.mjs$|\/persistent-start\.mjs$|\/package\.json$|\/uploads(?:\/|$)|\/apk(?:\/|$)|\/.*\.apk$)/i.test(pathname)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end('Not found');
+    }
     const nestedAsset = pathname.indexOf('/assets/');
     let rel = nestedAsset >= 0
       ? pathname.slice(nestedAsset + 1)
       : pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
-    rel = normalize(rel).replace(/^(\.\.[/\\])+/, '');
+    rel = normalize(rel);
+    const protectedRelativePath = rel.replace(/\\/g, '/');
+    if (/^(?:runtime-data\.json|\.env(?:\.|$)|.*(?:\.tmp|\.bak)$|server\.mjs$|persistent-start\.mjs$|package\.json$|uploads(?:\/|$)|apk(?:\/|$)|.*\.apk$)/i.test(protectedRelativePath)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end('Not found');
+    }
     let file = join(root, rel);
+    const normalizedRoot = normalize(root).replace(/[\\/]+$/, '');
+    if (file !== normalizedRoot && !file.startsWith(`${normalizedRoot}\\`) && !file.startsWith(`${normalizedRoot}/`)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end('Not found');
+    }
 
     try {
       if (!(await stat(file)).isFile()) throw new Error('not-file');

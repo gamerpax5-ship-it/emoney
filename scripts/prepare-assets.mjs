@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const configuredWebAppUrl = process.env.DIGIRUPEE_WEB_APP_URL || 'https://tronpay-production.up.railway.app/';
+const configuredWebAppUrl = process.env.DIGIRUPEE_WEB_APP_URL || 'https://loktron.com/';
 const webAppUrl = configuredWebAppUrl.endsWith('.html') ? configuredWebAppUrl : `${configuredWebAppUrl.replace(/\/$/, '')}/digirupee-app.html`;
 const uploadedWtron = process.env.WTRON_ANDROID_HTML || '';
 const canonicalAppJs = join(root, 'ui/digirupee-app.js');

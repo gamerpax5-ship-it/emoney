@@ -358,7 +358,12 @@ function proofChanged() {
     document.querySelector('.proof-preview')?.remove();
     const p = document.createElement('div');
     p.className = 'proof-preview';
-    p.innerHTML = `<img src="${rd.result}" alt="Payment proof preview"><span>${f.name}<br>${(f.size / 1024).toFixed(0)} KB</span>`;
+    const preview = document.createElement('img');
+    preview.src = String(rd.result);
+    preview.alt = 'Payment proof preview';
+    const details = document.createElement('span');
+    details.textContent = `${f.name}\n${(f.size / 1024).toFixed(0)} KB`;
+    p.append(preview, details);
     $('proofInput').closest('.upload').insertAdjacentElement('afterend', p);
   };
   rd.readAsDataURL(f);
@@ -410,7 +415,7 @@ function orderBadge(o) {
 
 function renderOrders() {
   const filtered = app.orderFilter === 'all' ? app.orders : app.orders.filter(o => o.status === app.orderFilter);
-  $('ordersTable').innerHTML = filtered.map(o => `<tr><td><span class="order-id-link" onclick="openOrder('${o.id}')">${o.id}</span></td><td>${new Date(o.date).toLocaleDateString()}</td><td>${money(o.inr)}</td><td>${num(o.usdt)}</td><td>${escapeHtml(o.utr)}</td><td><span class="badge ${orderBadge(o)}">${o.status}</span></td></tr>`).join('') || '<tr><td colspan="6">No orders in this status.</td></tr>';
+  $('ordersTable').innerHTML = filtered.map(o => `<tr><td><span class="order-id-link" data-order-id="${escapeHtml(o.id)}" onclick="openOrder(this.dataset.orderId)">${escapeHtml(o.id)}</span></td><td>${new Date(o.date).toLocaleDateString()}</td><td>${money(o.inr)}</td><td>${num(o.usdt)}</td><td>${escapeHtml(o.utr)}</td><td><span class="badge ${orderBadge(o)}">${escapeHtml(o.status)}</span></td></tr>`).join('') || '<tr><td colspan="6">No orders in this status.</td></tr>';
 }
 
 function openOrder(id) {
@@ -419,7 +424,7 @@ function openOrder(id) {
   const settlement = o.settlement?.txId ? `<div class="detail-box" style="grid-column:1/-1"><small>TRON TRANSACTION ID</small><b style="word-break:break-all">${escapeHtml(o.settlement.txId)}</b></div>` : '';
   const rejection = o.rejection?.reason ? `<div class="detail-box" style="grid-column:1/-1"><small>REJECTION REASON</small><b>${escapeHtml(o.rejection.reason)}</b></div>` : '';
   const body = $('orderDetailBody');
-  body.innerHTML = `<div class="detail-grid"><div class="detail-box"><small>ORDER ID</small><b>${o.id}</b></div><div class="detail-box"><small>STATUS</small><b>${o.status}</b></div><div class="detail-box"><small>INR PAID</small><b>${money(o.inr)}</b></div><div class="detail-box"><small>USDT ESTIMATE</small><b>${num(o.usdt)} USDT</b></div><div class="detail-box"><small>RATE</small><b>₹${Number(o.rate).toFixed(2)}</b></div><div class="detail-box"><small>UTR</small><b>${escapeHtml(o.utr)}</b></div><div class="detail-box"><small>PAYMENT MODE</small><b>${escapeHtml(o.configSnapshot?.paymentMode || app.config?.paymentMode || '—')}</b></div><div class="detail-box" style="grid-column:1/-1"><small>RECEIVING WALLET</small><b>${escapeHtml(o.wallet)}</b></div>${settlement}${rejection}</div>`;
+  body.innerHTML = `<div class="detail-grid"><div class="detail-box"><small>ORDER ID</small><b>${escapeHtml(o.id)}</b></div><div class="detail-box"><small>STATUS</small><b>${escapeHtml(o.status)}</b></div><div class="detail-box"><small>INR PAID</small><b>${money(o.inr)}</b></div><div class="detail-box"><small>USDT ESTIMATE</small><b>${num(o.usdt)} USDT</b></div><div class="detail-box"><small>RATE</small><b>₹${Number(o.rate).toFixed(2)}</b></div><div class="detail-box"><small>UTR</small><b>${escapeHtml(o.utr)}</b></div><div class="detail-box"><small>PAYMENT MODE</small><b>${escapeHtml(o.configSnapshot?.paymentMode || app.config?.paymentMode || '—')}</b></div><div class="detail-box" style="grid-column:1/-1"><small>RECEIVING WALLET</small><b>${escapeHtml(o.wallet)}</b></div>${settlement}${rejection}</div>`;
   showModal('orderDetailModal');
 }
 

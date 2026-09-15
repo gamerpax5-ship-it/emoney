@@ -8,7 +8,7 @@ android {
 
     val webAppUrlProvider = providers.gradleProperty("webAppUrl")
         .orElse(providers.environmentVariable("DIGIRUPEE_WEB_APP_URL"))
-        .orElse("https://tronpay-production.up.railway.app/")
+        .orElse("https://loktron.com/")
 
     fun quoted(value: String): String {
         return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""

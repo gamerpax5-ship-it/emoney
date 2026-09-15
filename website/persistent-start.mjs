@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('.', import.meta.url));
 const dataFile = join(root, 'runtime-data.json');
 const uploadDir = join(root, 'uploads');
-const supabaseUrl = String(process.env.LOKTRON_SUPABASE_URL || '').replace(/\/$/, '');
-const supabaseKey = String(process.env.LOKTRON_SUPABASE_KEY || '');
+const supabaseUrl = String(process.env.SUPABASE_URL || process.env.LOKTRON_SUPABASE_URL || '').replace(/\/$/, '');
+const supabaseKey = String(process.env.SUPABASE_SECRET_KEY || process.env.LOKTRON_SUPABASE_KEY || '');
 const persistenceSecret = String(process.env.LOKTRON_PERSISTENCE_SECRET || '');
 const persistenceEnabled = !!(supabaseUrl && supabaseKey && persistenceSecret);
 

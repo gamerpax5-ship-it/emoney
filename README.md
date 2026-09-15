@@ -52,7 +52,7 @@ The Android client is branded **digiRupee**. It does **not** load the LOKTRON ho
 
 The hosted digiRupee app then uses `/api/digirupee/*` for its own auth, rates, payout methods, orders, rewards, referrals, support and admin operations.
 
-The default production host is currently configured through `WEB_APP_URL`; override it at build time with `-PwebAppUrl=<url>` or `DIGIRUPEE_WEB_APP_URL`.
+The default production host is currently configured through WEB_APP_URL as https://loktron.com/; override it at build time with -PwebAppUrl=<url> or DIGIRUPEE_WEB_APP_URL.
 
 The Android Java namespace/application ID still uses the legacy technical package `com.loktron.tronpay`. Do not rename it casually because changing the application ID changes Android app identity. Product branding and product logic remain digiRupee.
 
@@ -88,7 +88,10 @@ ADMIN_EMAIL=<private admin email>
 ADMIN_PASSWORD=<strong secret>  # or ADMIN_PASSWORD_HASH=<scrypt$...>
 ADMIN_MFA_CODE=<optional admin code>
 ADMIN_ROLE=owner
-PUBLIC_ORIGIN=https://your-domain.example
+PUBLIC_ORIGIN=https://loktron.com
+SUPABASE_URL=<project URL>
+SUPABASE_SECRET_KEY=<server-only secret key>
+# Legacy compatibility names:
 LOKTRON_SUPABASE_URL=<project URL>
 LOKTRON_SUPABASE_KEY=<server-only secret/service key>
 LOKTRON_PERSISTENCE_SECRET=<long random persistence secret>
@@ -97,7 +100,7 @@ TRONGRID_API_KEY=<server key>
 DIGIRUPEE_2FA_ENCRYPTION_KEY=<server-only encryption key>
 ```
 
-Never expose server-only persistence, admin, TRON provider or digiRupee 2FA secrets in browser or Android source.
+Never expose server-only persistence, admin, TRON provider or digiRupee 2FA secrets in browser or Android source. The backend accepts SUPABASE_URL and SUPABASE_SECRET_KEY, with the legacy LOKTRON_SUPABASE_URL and LOKTRON_SUPABASE_KEY names retained for migration compatibility. Apply the SQL migration in supabase/migrations/ to the production Supabase project before enabling persistence. The /health route remains public; /ready returns 503 until required production configuration is complete.
 
 ## Change safety rule
 

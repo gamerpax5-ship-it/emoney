@@ -1,5 +1,5 @@
   if ($('recentOrders')) {
-    $('recentOrders').innerHTML = app.orders.slice(0, 5).map(o => `<div class="ticket" style="margin-bottom:8px"><div class="ticket-top"><h4><span class="order-id-link" onclick="openOrder('${o.id}')">${o.id}</span></h4><span class="badge ${orderBadge(o)}">${o.status}</span></div><div class="small" style="margin-top:5px">${money(o.inr)} → ${num(o.usdt)} USDT</div></div>`).join('') || '<div class="notice">No recent orders.</div>';
+    $('recentOrders').innerHTML = app.orders.slice(0, 5).map(o => `<div class="ticket" style="margin-bottom:8px"><div class="ticket-top"><h4><span class="order-id-link" data-order-id="${escapeHtml(o.id)}" onclick="openOrder(this.dataset.orderId)">${escapeHtml(o.id)}</span></h4><span class="badge ${orderBadge(o)}">${escapeHtml(o.status)}</span></div><div class="small" style="margin-top:5px">${money(o.inr)} → ${num(o.usdt)} USDT</div></div>`).join('') || '<div class="notice">No recent orders.</div>';
   }
   renderWalletHistory(completed);
   renderOrders();
