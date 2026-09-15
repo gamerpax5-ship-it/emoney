@@ -39,6 +39,9 @@ const tronPollIntervalMs = Math.max(1_000, Math.min(300_000, envNumber('TRON_POL
 const tronProviderTimeoutMs = Math.max(2_000, Math.min(30_000, envNumber('TRON_PROVIDER_TIMEOUT_MS', 10_000)));
 const tronLateDepositGraceMs = Math.max(60_000, Math.min(7 * 24 * 60 * 60 * 1000, envNumber('TRON_LATE_DEPOSIT_GRACE_MS', 24 * 60 * 60 * 1000)));
 const tronAddressReuseCooldownMs = Math.max(tronLateDepositGraceMs, Math.min(30 * 24 * 60 * 60 * 1000, envNumber('TRON_ADDRESS_REUSE_COOLDOWN_MS', 48 * 60 * 60 * 1000)));
+// Clean expiries (no tx ever detected) should not strand a small receiving-address pool for 48 hours.
+// Five minutes is the production default; tx-bearing/review cases still keep the long safety cooldown.
+const tronExpiredAddressReuseMs = Math.max(1_000, Math.min(60 * 60 * 1000, envNumber('TRON_EXPIRED_ADDRESS_REUSE_MS', 5 * 60 * 1000)));
 const tronMockScenario = String(process.env.TRON_MOCK_SCENARIO || 'no-transaction').trim().toLowerCase();
 const tronMockConfirmationSequence = String(process.env.TRON_MOCK_CONFIRMATION_SEQUENCE || '').split(',').map(value => value.trim()).filter(Boolean).map(value => Number(value)).filter(value => Number.isInteger(value) && value >= 0);
 const tronMockConfirmations = Math.max(0, envNumber('TRON_MOCK_CONFIRMATIONS', tronRequiredConfirmations));
@@ -862,8 +865,14 @@ function releaseDigiAddress(order, timestamp = Date.now(), { confirmed = false }
     Number(order.receivedUsdtMicros) === Number(order.usdtMicros) &&
     Number(order.confirmations || 0) >= tronRequiredConfirmations
   );
+  const cleanExpired = order.status === 'Expired' && !order.txId &&
+    (order.receivedUsdtMicros === null || order.receivedUsdtMicros === undefined);
   address.reservedOrderId = null;
-  const safeReuseAt = exactConfirmed ? timestamp : timestamp + digiAddressCooldownMs;
+  const safeReuseAt = exactConfirmed
+    ? timestamp
+    : cleanExpired
+      ? timestamp + tronExpiredAddressReuseMs
+      : timestamp + digiAddressCooldownMs;
   address.reservedUntil = safeReuseAt;
   address.updatedAt = timestamp;
   const assignment = db.digirupee.addressAssignments.find(item => item.orderId === order.id && item.addressId === address.id);
@@ -1269,9 +1278,39 @@ function ensureDigiAddressAssignments() {
   let changed = false;
   for (const order of db.digirupee.orders) {
     if (!order.depositAddressId || !order.depositAddress) continue;
-    if (db.digirupee.addressAssignments.some(item => item.orderId === order.id)) continue;
     const final = digiFinalStatuses.has(order.status);
-    const safeReuseAt = final ? Number(order.updatedAt || order.quoteExpiresAt || Date.now()) + digiAddressCooldownMs : null;
+    const cleanExpired = order.status === 'Expired' && !order.txId &&
+      (order.receivedUsdtMicros === null || order.receivedUsdtMicros === undefined);
+    const finalAt = Number(order.updatedAt || order.quoteExpiresAt || Date.now());
+    const safeReuseAt = final
+      ? finalAt + (cleanExpired ? tronExpiredAddressReuseMs : digiAddressCooldownMs)
+      : null;
+    const existing = db.digirupee.addressAssignments.find(item => item.orderId === order.id);
+    const address = db.digirupee.tronAddresses.find(item => item.id === order.depositAddressId);
+
+    // Boot-time migration: old clean test/expired orders may still carry the former
+    // 48-hour reuse window. Shorten only no-tx/no-receipt expiries; never shorten
+    // a deposit that has chain evidence or is under review.
+    if (existing) {
+      if (cleanExpired) {
+        if (!existing.releasedAt) { existing.releasedAt = finalAt; changed = true; }
+        if (!existing.safeReuseAt || Number(existing.safeReuseAt) > safeReuseAt) {
+          existing.safeReuseAt = safeReuseAt;
+          changed = true;
+        }
+        if (address?.reservedOrderId === order.id) {
+          address.reservedOrderId = null;
+          changed = true;
+        }
+        if (address && !address.reservedOrderId && (!address.reservedUntil || Number(address.reservedUntil) > safeReuseAt)) {
+          address.reservedUntil = safeReuseAt;
+          address.updatedAt = Date.now();
+          changed = true;
+        }
+      }
+      continue;
+    }
+
     db.digirupee.addressAssignments.push({
       addressId: order.depositAddressId,
       address: order.depositAddress,
@@ -1279,22 +1318,47 @@ function ensureDigiAddressAssignments() {
       userId: order.userId,
       assignedAt: order.createdAt,
       quoteExpiresAt: order.quoteExpiresAt,
-      releasedAt: final ? order.updatedAt : null,
+      releasedAt: final ? finalAt : null,
       safeReuseAt,
       txId: order.txId || null,
       status: order.status
     });
+    if (cleanExpired && address && !address.reservedOrderId && (!address.reservedUntil || Number(address.reservedUntil) > safeReuseAt)) {
+      address.reservedUntil = safeReuseAt;
+      address.updatedAt = Date.now();
+    }
     changed = true;
   }
   return changed;
 }
 
-function assignmentForTransfer(addressId, timestamp) {
+function assignmentForTransfer(addressId, timestamp, receivedUsdtMicros = null, candidateTxId = '') {
   const at = Number(timestamp);
   if (!Number.isFinite(at) || at <= 0) return null;
-  return db.digirupee.addressAssignments
+  const txId = normalizeDigiTxId(candidateTxId);
+  const matches = db.digirupee.addressAssignments
     .filter(item => item.addressId === addressId && Number(item.assignedAt) <= at && at <= Number(item.quoteExpiresAt) + tronLateDepositGraceMs)
-    .sort((a, b) => Number(b.assignedAt) - Number(a.assignedAt))[0] || null;
+    .map(assignment => ({ assignment, order: db.digirupee.orders.find(order => order.id === assignment.orderId) }))
+    .filter(item => item.order && (!item.order.txId || normalizeDigiTxId(item.order.txId) === txId))
+    .sort((a, b) => Number(b.assignment.assignedAt) - Number(a.assignment.assignedAt));
+  if (!matches.length) return null;
+
+  // Reused addresses can have overlapping late-deposit windows. Completed tx-bound
+  // assignments are excluded above. Prefer a unique exact-amount assignment; if
+  // two unclaimed historical orders are indistinguishable, do not auto-credit either.
+  const received = Number(receivedUsdtMicros);
+  if (Number.isSafeInteger(received) && received >= 0) {
+    const exact = matches.filter(item => Number(item.order.usdtMicros) === received);
+    if (exact.length === 1) return exact[0].assignment;
+    if (exact.length > 1) {
+      const onTimeExact = exact.filter(item => at <= Number(item.assignment.quoteExpiresAt));
+      return onTimeExact.length === 1 ? onTimeExact[0].assignment : null;
+    }
+  }
+
+  const onTime = matches.filter(item => at <= Number(item.assignment.quoteExpiresAt));
+  if (onTime.length === 1) return onTime[0].assignment;
+  return matches.length === 1 ? matches[0].assignment : null;
 }
 
 function normalizeDigiTxId(value) {
@@ -1611,7 +1675,7 @@ async function pollDigiOrder(order) {
     let matched = false;
     for (const rawCandidate of candidates) {
       const candidate = await hydrateDigiTransfer(rawCandidate);
-      const assignment = assignmentForTransfer(order.depositAddressId, candidate.timestamp);
+      const assignment = assignmentForTransfer(order.depositAddressId, candidate.timestamp, candidate.receivedUsdtMicros, candidate.txId);
       if (!assignment) continue;
       matched = true;
       const historicalOrder = db.digirupee.orders.find(item => item.id === assignment.orderId);
@@ -2715,6 +2779,7 @@ async function digirupeeApi(req, res, path) {
         pollIntervalMs: tronPollIntervalMs,
         lateDepositGraceMs: tronLateDepositGraceMs,
         addressReuseCooldownMs: tronAddressReuseCooldownMs,
+        expiredAddressReuseMs: tronExpiredAddressReuseMs,
         apiKeyConfigured: !!tronApiKey
       },
       monitor: {
@@ -3651,7 +3716,7 @@ async function digirupeeApi(req, res, path) {
       let matched = false;
       for (const rawCandidate of candidates) {
         const candidate = await hydrateDigiTransfer(rawCandidate);
-        const assignment = assignmentForTransfer(order.depositAddressId, candidate.timestamp);
+        const assignment = assignmentForTransfer(order.depositAddressId, candidate.timestamp, candidate.receivedUsdtMicros, candidate.txId);
         if (!assignment || assignment.orderId !== order.id) continue;
         matched = true;
         changed = applyDigiTransfer(order, candidate) || changed;
