@@ -1,0 +1,92 @@
+name: One-off V7 pool Android validation
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'scripts/oneoff-v7-pool-android.mjs'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply reviewed V7 patch
+        run: node scripts/oneoff-v7-pool-android.mjs
+
+      - name: Syntax checks
+        run: |
+          node --check website/server.mjs
+          node --check ui/digirupee-app.js
+          node --check ui/digirupee-layout-v3.js
+          node --check tests/digirupee-pool-flow.test.mjs
+
+      - name: Prepare hosted assets
+        run: npm run prepare-assets
+
+      - name: Run server integration tests
+        run: npm test
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build Android debug and release
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug assembleRelease -PwebAppUrl="https://tronpay-production.up.railway.app/"
+
+      - name: Validate APK outputs
+        run: |
+          test -s android/app/build/outputs/apk/debug/app-debug.apk
+          test -s android/app/build/outputs/apk/release/app-release-unsigned.apk
+          mkdir -p /tmp/digirupee-apks
+          cp android/app/build/outputs/apk/debug/app-debug.apk /tmp/digirupee-apks/digiRupee-debug-v1.0.5.apk
+          cp android/app/build/outputs/apk/release/app-release-unsigned.apk /tmp/digirupee-apks/digiRupee-release-v1.0.5-unsigned.apk
+
+      - name: Remove one-off automation and restore generated fallback
+        run: |
+          git checkout -- android/app/src/main/assets/offline.html || true
+          rm -f scripts/oneoff-v7-pool-android.mjs .github/workflows/oneoff-v7-pool-android.yml
+
+      - name: Commit validated source changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add website/server.mjs android/app/src/main/java/com/loktron/tronpay/MainActivity.java android/app/src/main/AndroidManifest.xml android/app/build.gradle.kts tests/digirupee-pool-flow.test.mjs
+          git add -u scripts/oneoff-v7-pool-android.mjs .github/workflows/oneoff-v7-pool-android.yml
+          git diff --cached --check
+          git diff --cached --quiet && { echo "No validated changes to commit"; exit 1; } || true
+          git commit -m "Optimize digiRupee address pool and Android safe insets"
+          git push origin HEAD:main
+
+      - name: Upload validated APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: digirupee-v1.0.5-validated-apks
+          path: /tmp/digirupee-apks/*.apk
+          if-no-files-found: error
