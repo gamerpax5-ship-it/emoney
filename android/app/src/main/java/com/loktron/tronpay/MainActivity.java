@@ -17,6 +17,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 1001;
@@ -34,21 +35,33 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(Color.rgb(7, 5, 18));
         getWindow().setNavigationBarColor(Color.rgb(7, 5, 18));
         getWindow().getDecorView().setSystemUiVisibility(0);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().setDecorFitsSystemWindows(false);
+        }
+
+        FrameLayout rootView = new FrameLayout(this);
+        rootView.setBackgroundColor(Color.rgb(7, 5, 18));
 
         webView = new WebView(this);
         webView.setBackgroundColor(Color.rgb(7, 5, 18));
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         webView.setVerticalScrollBarEnabled(false);
         webView.setHorizontalScrollBarEnabled(false);
-        setContentView(webView);
+        rootView.addView(webView, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+        ));
+        setContentView(rootView);
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-            webView.setOnApplyWindowInsetsListener((view, insets) -> {
-                android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            rootView.setOnApplyWindowInsetsListener((view, insets) -> {
+                android.graphics.Insets bars = insets.getInsets(
+                        WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout()
+                );
                 view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
                 return insets;
             });
-            webView.requestApplyInsets();
+            rootView.requestApplyInsets();
         }
 
         WebSettings settings = webView.getSettings();
@@ -66,11 +79,7 @@ public class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        String userAgentSuffix = " digiRupee/1.0.4";
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-            userAgentSuffix += " digiRupeeInsets/1";
-        }
-        settings.setUserAgentString(settings.getUserAgentString() + userAgentSuffix);
+        settings.setUserAgentString(settings.getUserAgentString() + " digiRupee/1.0.5");
 
         CookieManager cookieManager = CookieManager.getInstance();
         cookieManager.setAcceptCookie(true);
