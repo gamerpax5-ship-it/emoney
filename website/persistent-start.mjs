@@ -124,6 +124,8 @@ if (persistenceEnabled) {
 }
 
 await import('../scripts/enable-permanent-rewards.mjs');
+await import('../scripts/enable-deferred-referrals.mjs');
+await import('../scripts/enable-device-referral-fixes.mjs');
 await import('./server-runtime.mjs');
 
 if (persistenceEnabled) {
