@@ -2503,6 +2503,33 @@ function validDigiAmount(value, minimum = 0.01, maximum = 1_000_000) {
   return Number.isFinite(amount) && amount >= minimum && amount <= maximum ? Number(amount.toFixed(6)) : null;
 }
 
+const defaultDigiWheelRewards = [1, 3, 5, 6, 8, 10, 12, 15];
+const defaultDigiWheelWeights = [20, 18, 16, 14, 12, 10, 6, 4];
+function defaultDigiWheelSegments() {
+  return defaultDigiWheelRewards.map((reward, index) => ({
+    id: `sector_${index + 1}`,
+    label: `${reward} USDT`,
+    rewardAmountMicros: reward * 1_000_000,
+    probabilityWeight: defaultDigiWheelWeights[index],
+    enabled: true
+  }));
+}
+
+function ensureDigiWheelDefaults() {
+  const config = db.digirupee?.wheelConfig;
+  if (!config) return false;
+  const segments = Array.isArray(config.segments) ? config.segments : [];
+  const legacyPlaceholder = segments.length === 8 && segments.every((segment, index) =>
+    String(segment.id || '') === `sector_${index + 1}` &&
+    Number(segment.rewardAmountMicros || 0) === 0 &&
+    Number(segment.probabilityWeight || 0) === 1
+  );
+  if (segments.length && !legacyPlaceholder) return false;
+  config.segments = defaultDigiWheelSegments();
+  config.updatedAt = Date.now();
+  return true;
+}
+
 function ensureDigiReferralCodes() {
   let changed = false;
   const used = new Set();
@@ -4457,6 +4484,7 @@ const server = http.createServer(async (req, res) => {
 
 const digiBootStateChanged = [
   ensureDigiReferralCodes(),
+  ensureDigiWheelDefaults(),
   ensureDigiAddressAssignments(),
   ensureDigiSecurityFields(),
   ensureDigiSessionFields()
