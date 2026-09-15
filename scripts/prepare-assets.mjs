@@ -21,6 +21,12 @@ async function exists(path) {
   }
 }
 
+function replaceRequired(source, pattern, replacement, label) {
+  const next = source.replace(pattern, replacement);
+  if (next === source) throw new Error(`Required production transform did not match: ${label}`);
+  return next;
+}
+
 function replaceOverlay(source, id, replacement) {
   const start = source.indexOf(`<div class="overlay" id="${id}"`);
   if (start < 0) return source;
@@ -69,8 +75,65 @@ function productionHtml(source) {
   html = html.replace(/₹108\.00/g, '—');
   html = replaceOverlay(html, 'sessionsOv', '<div class="overlay" id="sessionsOv" onclick="bg(event,\'sessionsOv\')"><div class="sheet"><div class="handle"></div><h3>Login & Devices</h3><p class="desc">Loading active sessions…</p></div></div>');
   html = replaceOverlay(html, 'supportOv', '<div class="overlay" id="supportOv" onclick="bg(event,\'supportOv\')"><div class="sheet"><div class="handle"></div><h3>Help & Support</h3><p class="desc">Loading your support tickets…</p></div></div>');
-  html = html.replace(/<\/body>/i, '<script src="/digirupee-qr.js?v=20260915d" defer></script><script src="/digirupee-app.js?v=20260915d" defer></script><script src="/digirupee-rewards-assets.js?v=20260915d" defer></script><script src="/digirupee-rewards.js?v=20260915d" defer></script><script src="/digirupee-layout-v3.js?v=20260915d" defer></script><script src="/digirupee-enhancements.js?v=20260915d" defer></script></body>');
+  html = html.replace(/<\/body>/i, '<script src="/digirupee-qr.js?v=20260915e" defer></script><script src="/digirupee-app.js?v=20260915e" defer></script><script src="/digirupee-rewards-assets.js?v=20260915e" defer></script><script src="/digirupee-rewards.js?v=20260915e" defer></script><script src="/digirupee-layout-v3.js?v=20260915e" defer></script><script src="/digirupee-enhancements.js?v=20260915e" defer></script></body>');
   return html;
+}
+
+async function prepareDigiAdmin() {
+  const path = join(root, 'website/digirupee-admin.html');
+  let html = await readFile(path, 'utf8');
+  html = html.replace('Inviter reward USDT', 'Inviter commission %');
+  html = html.replace('<input class="input" id="inviterReward" type="number" min="0" step="0.000001">', '<input class="input" id="inviterReward" type="number" min="0" max="100" step="0.01">');
+  html = html.replace(/<div class="field"><label>Referred reward USDT<\/label><input class="input" id="referredReward" type="number" min="0" step="0\.000001"><\/div>/, '');
+  html = html.replace("$('inviterReward').value = policy.inviterRewardUsdt ?? 0; $('referredReward').value = policy.referredRewardUsdt ?? 0;", "$('inviterReward').value = policy.inviterCommissionPercent ?? 1;");
+  html = html.replace("inviterRewardUsdt:Number($('inviterReward').value),referredRewardUsdt:Number($('referredReward').value),minimumCompletedUsdt:Number($('referralMinimum').value)", "inviterCommissionPercent:Number($('inviterReward').value),minimumCompletedUsdt:Number($('referralMinimum').value)");
+  await writeFile(path, html, 'utf8');
+}
+
+async function compileProductionServer() {
+  const sourcePath = join(root, 'website/server.mjs');
+  const outputPath = join(root, 'website/server-runtime.mjs');
+  let source = await readFile(sourcePath, 'utf8');
+
+  source = replaceRequired(
+    source,
+    "referrals: { enabled: true, inviterRewardUsdt: 10, referredRewardUsdt: 0, minimumCompletedUsdt: 0 },",
+    "referrals: { enabled: true, inviterCommissionPercent: 1, minimumCompletedUsdt: 0 },",
+    'default referral percentage policy'
+  );
+
+  source = replaceRequired(
+    source,
+    /function referralPolicy\(\) \{[\s\S]*?\n\}/,
+    `function referralPolicy() {\n  const policy = db.digirupee.config.referrals || {};\n  return { enabled: policy.enabled !== false, inviterCommissionPercent: Number(policy.inviterCommissionPercent ?? 1), minimumCompletedUsdt: Number(policy.minimumCompletedUsdt || 0) };\n}`,
+    'referralPolicy'
+  );
+
+  source = replaceRequired(
+    source,
+    /  referral\.qualifyingOrderId = order\.id;\n  appendDigiAudit\(\{ actorType: 'system', actorId: 'digirupee', action: 'referral\.qualified'[\s\S]*?  referral\.status = 'rewarded';/,
+    `  referral.qualifyingOrderId = order.id;\n  appendDigiAudit({ actorType: 'system', actorId: 'digirupee', action: 'referral.qualified', entityType: 'referral', entityId: referral.id, details: { qualifyingOrderId: order.id } });\n  const inviter = db.digirupee.users.find(user => user.id === referral.referrerUserId);\n  const commissionMicros = Math.max(0, Math.floor(Number(order.usdtMicros || 0) * Number(policy.inviterCommissionPercent || 0) / 100));\n  if (inviter && commissionMicros > 0) {\n    const result = issueDigiReward({ userId: inviter.id, amountMicros: commissionMicros, type: 'referral', sourceType: 'referral', sourceId: \`${'${referral.id}'}:inviter\`, description: \`Referral commission ${'${Number(policy.inviterCommissionPercent || 0)}'}% on qualifying completed sell order\` });\n    if (result.entry) referral.inviterRewardLedgerId = result.entry.id;\n  }\n  referral.status = 'rewarded';`,
+    'percentage referral award'
+  );
+
+  source = replaceRequired(
+    source,
+    /  if \(req\.method === 'PATCH' && path === '\/admin\/referral-policy'\) \{[\s\S]*?\n  \}\n\n  if \(req\.method === 'GET' && path === '\/payout-methods'\)/,
+    `  if (req.method === 'PATCH' && path === '/admin/referral-policy') {\n    const admin = adminAuth(req); requireAdminRole(admin, ['owner']); const b = await body(req);\n    const inviterCommissionPercent = Number(b.inviterCommissionPercent ?? 1);\n    const minimumCompletedUsdt = validDigiAmount(b.minimumCompletedUsdt ?? 0, 0, 1_000_000);\n    if (!Number.isFinite(inviterCommissionPercent) || inviterCommissionPercent < 0 || inviterCommissionPercent > 100 || minimumCompletedUsdt === null) return send(res, 400, { error: 'Referral commission policy is invalid' });\n    db.digirupee.config.referrals = { enabled: b.enabled !== false, inviterCommissionPercent, minimumCompletedUsdt };\n    db.digirupee.config.updatedAt = Date.now();\n    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'referral.policy.updated', entityType: 'referral-policy', entityId: 'config', details: { enabled: db.digirupee.config.referrals.enabled, inviterCommissionPercent, minimumCompletedUsdt } });\n    await persist();\n    return send(res, 200, { policy: referralPolicy() });\n  }\n\n  if (req.method === 'GET' && path === '/payout-methods')`,
+    'admin referral policy endpoint'
+  );
+
+  source = replaceRequired(
+    source,
+    /  if \(req\.method === 'GET' && path === '\/referrals'\) \{[\s\S]*?\n  \}\n\n  if \(req\.method === 'GET' && path === '\/admin\/rewards'\)/,
+    `  if (req.method === 'GET' && path === '/referrals') {\n    const { user } = digirupeeAuth(req);\n    const own = db.digirupee.referrals.filter(referral => referral.referrerUserId === user.id);\n    const code = user.referralCode || null;\n    const downloadUrl = code ? \`https://digirupee.loktron.com/download/digirupee.apk?ref=${'${encodeURIComponent(code)}'}\` : null;\n    return send(res, 200, { referralCode: code, shareText: code ? \`Download digiRupee and earn with my referral code ${'${code}'}\` : null, webUrl: downloadUrl, downloadUrl, invitedCount: own.length, qualifiedCount: own.filter(item => ['qualified', 'rewarded'].includes(item.status)).length, rewardEarned: formatUsdtMicros(own.reduce((sum, referral) => sum + Number(db.digirupee.rewardLedger.find(entry => entry.id === referral.inviterRewardLedgerId)?.amountMicros || 0), 0)), referrals: own.map(referralPublic) });\n  }\n\n  if (req.method === 'GET' && path === '/admin/rewards')`,
+    'APK referral share URL'
+  );
+
+  source = source.replace("'/digirupee-layout-v3.js'\n    ]);", "'/digirupee-layout-v3.js',\n      '/digirupee-enhancements.js'\n    ]);");
+
+  await writeFile(outputPath, source, 'utf8');
+  return outputPath;
 }
 
 async function rebuildAndroid() {
@@ -115,5 +178,7 @@ async function rebuildAndroid() {
   return { hostedHtml, hostedJs, hostedQrJs, hostedRewardsJs, hostedRewardsAssetsJs, hostedLayoutJs, hostedEnhancementsJs, fallback, webAppUrl, bytes: Buffer.byteLength(sourceHtml) };
 }
 
+await prepareDigiAdmin();
+const runtimeServer = await compileProductionServer();
 const android = await rebuildAndroid();
-console.log('Prepared Android fallback asset:', android);
+console.log('Prepared digiRupee production assets:', { ...android, runtimeServer });
