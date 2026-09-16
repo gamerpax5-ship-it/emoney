@@ -125,6 +125,73 @@
         .reward-v4-wheel-card{grid-template-columns:165px minmax(0,1fr);gap:8px;padding:11px}.reward-v4-wheel-wrap{width:158px;height:158px}
         .reward-v4-wheel-label{font-size:8.2px}.reward-v4-zone-grid{grid-template-columns:1fr 1fr}.reward-v4-zone-card{min-height:84px}
       }
+
+      /* Rewards-only V5: balanced mobile layout and professional readability. */
+      .reward-v4-root{gap:12px!important;padding:4px 0 10px!important}
+      .reward-v4-hero{min-height:210px!important;padding:18px!important;border-radius:20px!important}
+      .reward-v4-copy{max-width:59%!important}
+      .reward-v4-copy h2{margin:12px 0 9px!important;font-size:30px!important;line-height:1.02!important}
+      .reward-v4-copy p{max-width:260px;font-size:13px!important;line-height:1.5!important;color:#e0cec0!important}
+      .reward-v4-kicker{min-height:27px!important;padding:5px 10px!important;font-size:11px!important}
+      .reward-v4-explore{min-height:42px!important;margin-top:16px!important;padding:0 17px!important;font-size:12px!important}
+      .reward-v4-wallet{right:16px!important;bottom:16px!important;width:148px!important;padding:13px!important}
+      .reward-v4-wallet small{font-size:11px!important}.reward-v4-wallet b{font-size:19px!important}.reward-v4-wallet span{font-size:10.5px!important}
+      .reward-v4-news{min-height:46px!important;padding:0 13px!important;gap:9px!important;border-radius:14px!important}
+      .reward-v4-news strong{font-size:11px!important}.reward-v4-news span{font-size:11.5px!important}.reward-v4-news em{font-size:10.5px!important}
+      .reward-v4-wheel-card{grid-template-columns:172px minmax(0,1fr)!important;gap:16px!important;padding:16px!important;border-radius:18px!important}
+      .reward-v4-wheel-wrap{--reward-wheel-label-radius:58px;width:164px!important;height:164px!important}
+      .reward-v4-wheel{border-width:6px!important}
+      .reward-v4-wheel:after{width:55px!important;height:55px!important;font-size:12px!important}
+      .reward-v4-pointer{border-left-width:9px!important;border-right-width:9px!important;border-top-width:18px!important}
+      .reward-v4-wheel-label{font-size:9px!important}
+      .reward-v4-wheel-copy h3{margin-top:8px!important;font-size:21px!important;line-height:1.15!important}
+      .reward-v4-wheel-copy p{margin-top:8px!important;font-size:12px!important;line-height:1.5!important}
+      .reward-v4-spin-status{margin-top:13px!important;padding:12px!important;border-radius:14px!important}
+      .reward-v4-spin-status b{font-size:13px!important}.reward-v4-spin-status small{font-size:11px!important;line-height:1.45!important}
+      .reward-v4-spin{min-height:43px!important;margin-top:11px!important;font-size:12px!important}
+      .reward-v4-zone{padding:3px 0!important}
+      .reward-v4-section-head{margin:4px 2px 10px!important}
+      .reward-v4-section-head h3{font-size:17px!important}.reward-v4-section-head button{font-size:11.5px!important}
+      .reward-v4-zone-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important}
+      .reward-v4-zone-card{display:grid!important;grid-template-columns:46px minmax(0,1fr)!important;grid-template-rows:auto auto!important;column-gap:11px!important;align-items:center!important;min-width:0!important;min-height:108px!important;padding:13px!important;border-radius:15px!important;text-align:left!important;overflow:hidden!important}
+      .reward-v4-zone-icon{grid-row:1 / 3!important;width:44px!important;height:44px!important;margin:0!important;border-radius:13px!important;font-size:21px!important}
+      .reward-v4-zone-card b{align-self:end;min-width:0;font-size:13px!important;line-height:1.25!important;overflow-wrap:anywhere}
+      .reward-v4-zone-card small{align-self:start;min-width:0;margin-top:4px!important;font-size:11px!important;line-height:1.35!important;overflow-wrap:anywhere}
+      .reward-v4-tasks{padding-top:6px!important}.reward-v4-task-list{gap:10px!important}
+      .reward-v4-task{padding:14px!important;border-radius:15px!important}
+      .reward-v4-task h4{font-size:13px!important;line-height:1.3!important}.reward-v4-task p{font-size:11.5px!important;line-height:1.5!important}
+      .reward-v4-task-reward{font-size:11.5px!important}.reward-v4-task button{min-height:36px!important;font-size:11.5px!important}
+      .reward-v4-empty{font-size:12px!important}
+      @media(max-width:420px){
+        .reward-v4-hero{min-height:218px!important;padding:16px!important}
+        .reward-v4-copy{max-width:66%!important}
+        .reward-v4-copy h2{font-size:27px!important}
+        .reward-v4-copy p{font-size:12px!important}
+        .reward-v4-mascot{width:55%!important;height:82%!important;opacity:.82!important}
+        .reward-v4-wallet{right:12px!important;bottom:12px!important;width:132px!important;padding:11px!important}
+        .reward-v4-wallet b{font-size:16px!important}
+        .reward-v4-news{grid-template-columns:auto minmax(0,1fr)!important}
+        .reward-v4-news em{display:none!important}
+        .reward-v4-wheel-card{grid-template-columns:140px minmax(0,1fr)!important;gap:12px!important;padding:13px!important}
+        .reward-v4-wheel-wrap{--reward-wheel-label-radius:48px;width:134px!important;height:134px!important}
+        .reward-v4-wheel{border-width:5px!important}
+        .reward-v4-wheel:after{width:48px!important;height:48px!important;font-size:10px!important}
+        .reward-v4-wheel-label{font-size:8px!important}
+        .reward-v4-wheel-copy h3{font-size:18px!important}
+        .reward-v4-wheel-copy p{font-size:11px!important}
+        .reward-v4-spin-status{padding:10px!important}
+        .reward-v4-spin-status b{font-size:12px!important}.reward-v4-spin-status small{font-size:10.5px!important}
+        .reward-v4-zone-card{grid-template-columns:41px minmax(0,1fr)!important;column-gap:9px!important;min-height:104px!important;padding:11px!important}
+        .reward-v4-zone-icon{width:40px!important;height:40px!important;font-size:19px!important}
+        .reward-v4-zone-card b{font-size:12px!important}.reward-v4-zone-card small{font-size:10.5px!important}
+      }
+      @media(max-width:350px){
+        .reward-v4-copy{max-width:72%!important}.reward-v4-copy h2{font-size:25px!important}
+        .reward-v4-wheel-card{grid-template-columns:126px minmax(0,1fr)!important;gap:9px!important;padding:11px!important}
+        .reward-v4-wheel-wrap{--reward-wheel-label-radius:43px;width:120px!important;height:120px!important}
+        .reward-v4-zone-grid{gap:8px!important}.reward-v4-zone-card{grid-template-columns:1fr!important;grid-template-rows:auto auto auto!important;text-align:center!important}
+        .reward-v4-zone-icon{grid-row:auto!important;margin:0 auto 4px!important}
+      }
     `;
     document.head.appendChild(style);
   }
@@ -210,7 +277,7 @@
       const label = document.createElement('span');
       label.className = 'reward-v4-wheel-label';
       const angle = i * 45 + 22.5;
-      label.style.transform = `rotate(${angle}deg) translateY(-68px) rotate(${-angle}deg)`;
+      label.style.transform = `rotate(${angle}deg) translateY(calc(-1 * var(--reward-wheel-label-radius, 58px))) rotate(${-angle}deg)`;
       label.textContent = `${num(segment.rewardAmount)}₮`;
       wheel.appendChild(label);
     }
