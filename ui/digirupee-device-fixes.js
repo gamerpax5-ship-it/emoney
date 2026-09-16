@@ -48,7 +48,7 @@
       #rewards .reward-v4-news,#rewards .reward-v4-wheel-card,#rewards .reward-v4-task,#rewards .reward-v4-zone-card{max-width:100%!important;box-sizing:border-box!important}
 
       /* Home reward ticker: intentionally isolated so the existing Home UI is untouched. */
-      .digi-home-reward-news{display:flex;align-items:center;gap:9px;width:100%;min-height:35px;margin:9px 0 2px;padding:0 10px;border:1px solid #3b3220;border-radius:11px;background:#0d0f12;box-sizing:border-box;overflow:hidden}
+      #home .digi-home-reward-news{position:relative;inset:auto;display:flex;align-items:center;gap:9px;width:100%;min-height:42px;margin:18px 0 0;padding:9px 0;border:0;border-top:1px solid #3b3220;border-bottom:1px solid #3b3220;border-radius:0;background:transparent;box-sizing:border-box;overflow:hidden}
       .digi-home-reward-news-label{display:flex;align-items:center;gap:5px;flex:none;color:#f0ca59;font-size:9px;font-weight:900;letter-spacing:.035em;white-space:nowrap}
       .digi-home-reward-news-label i{width:6px;height:6px;border-radius:50%;background:#ef5454;box-shadow:0 0 0 3px #ef545422}
       .digi-home-reward-news-window{min-width:0;flex:1;overflow:hidden;white-space:nowrap}
@@ -105,19 +105,18 @@
     return [...new Set(messages)].slice(0,10);
   }
 
-  function homeHeroAnchor(home) {
-    const title = home?.querySelector('[data-i18n="heroTitle"]');
-    if (!title) return null;
-    const explicit = title.closest('.hero,.hero-card,.home-hero,[class*="hero"]');
-    if (explicit && home.contains(explicit)) return explicit;
-    let node = title;
-    while (node?.parentElement && node.parentElement !== home) node = node.parentElement;
-    return node && node.parentElement === home ? node : null;
+  function homePortfolioAnchor(home) {
+    const grid = home?.querySelector('.portfolio-grid');
+    if (!grid) return null;
+    const heading = grid.previousElementSibling;
+    return heading?.matches('.section') ? heading : grid;
   }
 
   function renderHomeRewardNews() {
     const home = document.getElementById('home');
     if (!home) return;
+    const anchor = homePortfolioAnchor(home);
+    if (!anchor) { document.getElementById('digiHomeRewardNews')?.remove(); return; }
     const messages = rewardNewsMessages();
     let bar = document.getElementById('digiHomeRewardNews');
     if (!messages.length) { bar?.remove(); return; }
@@ -127,8 +126,9 @@
       bar.className = 'digi-home-reward-news';
       bar.setAttribute('aria-label','Reward news');
       bar.innerHTML = '<div class="digi-home-reward-news-label"><i></i>REWARD NEWS</div><div class="digi-home-reward-news-window"><div class="digi-home-reward-news-track"><span></span><span></span></div></div>';
-      const hero = homeHeroAnchor(home);
-      if (hero?.parentElement) hero.insertAdjacentElement('afterend', bar); else home.prepend(bar);
+    }
+    if (bar.parentElement !== anchor.parentElement || bar.nextElementSibling !== anchor) {
+      anchor.insertAdjacentElement('beforebegin', bar);
     }
     const line = messages.join('   •   ');
     bar.querySelectorAll('.digi-home-reward-news-track span').forEach(node => { if (node.textContent !== line) node.textContent = line; });
