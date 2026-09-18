@@ -21,7 +21,7 @@ if (/\/digirupee-device-fixes\.js(?:\?v=[^"']+)?/.test(html)) {
   html = html.replace(/<\/body>/i, `${scriptTag}</body>`);
 }
 
-const profileScriptTag = '<script src="/digirupee-profile-polish.js?v=20260919a" defer></script>';
+const profileScriptTag = '<script src="/digirupee-profile-polish.js?v=20260919b" defer></script>';
 if (/\/digirupee-profile-polish\.js(?:\?v=[^"']+)?/.test(html)) {
   html = html.replace(/<script src="\/digirupee-profile-polish\.js(?:\?v=[^"']+)?" defer><\/script>/, profileScriptTag);
 } else {
