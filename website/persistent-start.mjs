@@ -95,6 +95,34 @@ async function persistAllFiles() {
   for (const name of files) await persistFile(name);
 }
 
+async function optimizeDigiProductionAssets() {
+  const appJsPath = join(root, 'digirupee-app.js');
+  let source;
+  try { source = await readFile(appJsPath, 'utf8'); }
+  catch { return; }
+
+  const domReadyBoot = `  document.addEventListener('DOMContentLoaded', async () => {\n    injectAuth();\n    const app = document.querySelector('.app'); if (app) app.style.display = 'none';\n    setInterval(tick, 1000); tick();\n    try {\n      const result = await api('/me', { allow401:true });\n      await authenticated(result);\n    } catch (error) {\n      document.body.classList.add('digi-ready');\n      const auth = $('digiAuth'); if (auth) auth.hidden = false;\n      // A fresh install has no session. Show a clean login screen; real login errors still surface on submit.\n      renderAuth('login');\n    }\n  });`;
+  const fastBoot = `  ;(async () => {\n    injectAuth();\n    const app = document.querySelector('.app'); if (app) app.style.display = 'none';\n    setInterval(tick, 1000); tick();\n    try {\n      const result = await api('/me', { allow401:true });\n      await authenticated(result);\n    } catch (error) {\n      document.body.classList.add('digi-ready');\n      const auth = $('digiAuth'); if (auth) auth.hidden = false;\n      renderAuth('login');\n    }\n  })();`;
+
+  let changed = false;
+  if (source.includes(domReadyBoot)) {
+    source = source.replace(domReadyBoot, fastBoot);
+    changed = true;
+  }
+
+  const oldSchedule = "  function scheduleRefresh() { clearTimeout(state.refreshTimer); if (state.user && !document.hidden) state.refreshTimer = setTimeout(refreshAll, 12000); }";
+  const adaptiveSchedule = "  function scheduleRefresh() { clearTimeout(state.refreshTimer); if (state.user && !document.hidden) state.refreshTimer = setTimeout(refreshAll, activeOrder() ? 10000 : 35000); }";
+  if (source.includes(oldSchedule)) {
+    source = source.replace(oldSchedule, adaptiveSchedule);
+    changed = true;
+  }
+
+  if (changed) {
+    await writeFile(appJsPath, source, 'utf8');
+    console.log('Optimized digiRupee fast boot and adaptive background refresh');
+  }
+}
+
 let stateTimer;
 const fileTimers = new Map();
 function queueStateSync() {
@@ -126,6 +154,7 @@ if (persistenceEnabled) {
 await import('../scripts/enable-permanent-rewards.mjs');
 await import('../scripts/enable-deferred-referrals.mjs');
 await import('../scripts/enable-device-referral-fixes.mjs');
+await optimizeDigiProductionAssets();
 await import('./server-runtime.mjs');
 
 if (persistenceEnabled) {
