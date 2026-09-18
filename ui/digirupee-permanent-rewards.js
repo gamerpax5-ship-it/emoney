@@ -27,6 +27,12 @@
       .digi-joining-bonus{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px;border:1px solid #3b3523;border-radius:12px;background:#17150f;margin-bottom:10px}.digi-joining-bonus b{display:block;font-size:13px}.digi-joining-bonus small{display:block;margin-top:3px;color:#9e978c;font-size:10.5px}.digi-joining-bonus strong{color:#ffdc69;font-size:14px;white-space:nowrap}
       .digi-tier-list{display:grid;gap:8px}.digi-tier{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:11px;border:1px solid #2d3036;border-radius:12px;background:#0d0f12}.digi-tier.earned{border-color:#315c49;background:#0e1814}.digi-tier.locked{opacity:.82}.digi-tier b{display:block;font-size:12.5px}.digi-tier small{display:block;margin-top:3px;color:#979da6;font-size:10.5px;line-height:1.4}.digi-tier strong{color:#f4cf67;font-size:13px;white-space:nowrap}.digi-tier.earned strong{color:#71dfa9}
       .digi-tier-progress{height:4px;margin-top:7px;border-radius:99px;background:#25282d;overflow:hidden}.digi-tier-progress i{display:block;height:100%;background:linear-gradient(90deg,#c78a20,#f5d867)}
+      #rewards .digi-permanent-head{display:block}
+      #rewards .digi-permanent-stats{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:9px;margin:12px 0}
+      #rewards .digi-permanent-stats .digi-permanent-volume{display:flex;flex-direction:column;justify-content:center;min-width:0;padding:11px 12px;text-align:left;border-radius:12px}
+      #rewards .digi-permanent-stats .digi-permanent-volume small{font-size:10.5px;line-height:1.4}
+      #rewards .digi-permanent-stats .digi-permanent-volume b{font-size:17px;margin-top:4px;overflow-wrap:anywhere}
+      #rewards .digi-permanent-stats:has(> :only-child){grid-template-columns:1fr}
       body.digi-light .digi-permanent-rewards{background:#fff!important;color:#15171a!important;border-color:#dde2e8!important}body.digi-light .digi-permanent-volume,body.digi-light .digi-joining-bonus,body.digi-light .digi-tier{background:#f8f9fb!important;border-color:#e0e4ea!important}body.digi-light .digi-permanent-head p,body.digi-light .digi-joining-bonus small,body.digi-light .digi-tier small{color:#626b76!important}
     `;
     document.head.appendChild(style);
@@ -49,23 +55,36 @@
     return panel;
   }
 
+  function renderPanel(panel, markup) {
+    const wallet = $('rewardV4Wallet');
+    panel.innerHTML = markup;
+    if (!wallet) return;
+    let stats = panel.querySelector('.digi-permanent-stats');
+    if (!stats) {
+      stats = document.createElement('div');
+      stats.className = 'digi-permanent-stats';
+      panel.appendChild(stats);
+    }
+    stats.prepend(wallet);
+  }
+
   function render() {
     injectStyle();
     const panel = ensurePanel();
     if (!panel) return;
     if (!program) {
-      panel.innerHTML = '<div class="digi-permanent-head"><div><h3>Permanent Rewards</h3><p>Loading your bonus progress…</p></div></div>';
+      renderPanel(panel, '<div class="digi-permanent-head"><div><h3>Permanent Rewards</h3><p>Loading your bonus progress…</p></div></div>');
       return;
     }
     if (program.enabled === false) {
-      panel.innerHTML = '<div class="digi-permanent-head"><div><h3>Permanent Rewards</h3><p>This reward program is currently paused.</p></div></div>';
+      renderPanel(panel, '<div class="digi-permanent-head"><div><h3>Permanent Rewards</h3><p>This reward program is currently paused.</p></div></div>');
       return;
     }
     const best = Number(program.bestCompletedDepositUsdt || 0);
     const joining = program.joiningBonus || {};
     const tiers = Array.isArray(program.tiers) ? program.tiers : [];
-    panel.innerHTML = `
-      <div class="digi-permanent-head"><div><h3>Permanent Rewards</h3><p>Complete eligible USDT deposits and unlock one-time bonuses.</p></div><div class="digi-permanent-volume"><small>Best completed deposit</small><b>${num(best)} USDT</b></div></div>
+    renderPanel(panel, `
+      <div class="digi-permanent-head"><div><h3>Permanent Rewards</h3><p>Complete eligible USDT deposits and unlock one-time bonuses.</p></div></div><div class="digi-permanent-stats"><div class="digi-permanent-volume"><small>Best completed deposit</small><b>${num(best)} USDT</b></div></div>
       <div class="digi-joining-bonus"><div><b>🎁 Joining Reward</b><small>${joining.credited ? 'Welcome bonus credited to your rewards.' : 'Available automatically for newly registered users.'}</small></div><strong>${num(joining.amountUsdt || 0)} USDT${joining.credited ? ' ✓' : ''}</strong></div>
       <div class="digi-tier-list">${tiers.map(tier => {
         const threshold = Number(tier.thresholdUsdt || 0);
@@ -73,7 +92,7 @@
         const progress = threshold > 0 ? Math.max(0, Math.min(100, best / threshold * 100)) : 0;
         const status = tier.earned ? 'Earned' : tier.skipped ? 'Passed' : best >= threshold ? 'Eligible' : `${num(Math.max(0, threshold - best))} USDT to go`;
         return `<div class="digi-tier ${tier.earned ? 'earned' : 'locked'}"><div><b>Complete ${num(threshold)} USDT deposit</b><small>${esc(status)}</small><div class="digi-tier-progress"><i style="width:${tier.earned || tier.skipped ? 100 : progress}%"></i></div></div><strong>${tier.earned ? '✓ ' : '+'}${num(reward)} USDT</strong></div>`;
-      }).join('')}</div>`;
+      }).join('')}</div>`);
   }
 
   async function refreshProgram() {
@@ -119,6 +138,10 @@
     return false;
   }
   window.__digiHandleBack = handleBack;
+
+  // The rewards shell builds on the next animation frame; mount its wallet
+  // even when the permanent-program response arrived before that frame.
+  window.addEventListener('digirupee:rewards-built', render);
 
   const previousGo = window.go;
   if (typeof previousGo === 'function') {
