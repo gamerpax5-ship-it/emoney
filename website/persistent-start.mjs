@@ -110,6 +110,13 @@ async function optimizeDigiProductionAssets() {
     changed = true;
   }
 
+  const oldAuthenticated = `  async function authenticated(result) {\n    document.body.classList.add('digi-ready');\n    state.user = result.user || null;\n    state.profile = result.profile || null;\n    $('digiAuth').hidden = true;\n    const app = document.querySelector('.app'); if (app) app.style.display = '';\n    await refreshAll();\n  }`;
+  const stableAuthenticated = `  async function authenticated(result) {\n    state.user = result.user || null;\n    state.profile = result.profile || null;\n    await refreshAll();\n    document.body.classList.add('digi-ready');\n    $('digiAuth').hidden = true;\n    const app = document.querySelector('.app'); if (app) app.style.display = '';\n  }`;
+  if (source.includes(oldAuthenticated)) {
+    source = source.replace(oldAuthenticated, stableAuthenticated);
+    changed = true;
+  }
+
   const oldSchedule = "  function scheduleRefresh() { clearTimeout(state.refreshTimer); if (state.user && !document.hidden) state.refreshTimer = setTimeout(refreshAll, 12000); }";
   const adaptiveSchedule = "  function scheduleRefresh() { clearTimeout(state.refreshTimer); if (state.user && !document.hidden) state.refreshTimer = setTimeout(refreshAll, activeOrder() ? 10000 : 35000); }";
   if (source.includes(oldSchedule)) {
@@ -119,7 +126,7 @@ async function optimizeDigiProductionAssets() {
 
   if (changed) {
     await writeFile(appJsPath, source, 'utf8');
-    console.log('Optimized digiRupee fast boot and adaptive background refresh');
+    console.log('Optimized digiRupee fast boot, stable first paint and adaptive background refresh');
   }
 }
 
