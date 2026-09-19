@@ -114,15 +114,12 @@ async function optimizeDigiProductionAssets() {
   const synchronizedAuthenticated = `  async function authenticated(result) {
     state.user = result.user || null;
     state.profile = result.profile || null;
-
-    // Paint the real app immediately after session validation. Data refresh stays in the background.
-    // This changes only startup sequencing; API/business logic remains unchanged.
     state.activeOrderId = null;
     renderAll();
     document.body.classList.add('digi-ready');
+    document.documentElement.classList.remove('digi-booting');
     $('digiAuth').hidden = true;
     const app = document.querySelector('.app'); if (app) app.style.display = '';
-
     refreshAll();
   }`;
   if (source.includes(oldAuthenticated)) {
