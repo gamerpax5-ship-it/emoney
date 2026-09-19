@@ -11,6 +11,7 @@ const canonicalQrJs = join(root, 'ui/digirupee-qr.js');
 const canonicalRewardsJs = join(root, 'ui/digirupee-rewards.js');
 const canonicalLayoutJs = join(root, 'ui/digirupee-layout-v3.js');
 const canonicalEnhancementsJs = join(root, 'ui/digirupee-enhancements.js');
+const canonicalRewardHeroFixJs = join(root, 'ui/digirupee-reward-hero-fix.js');
 
 async function exists(path) {
   try {
@@ -75,7 +76,7 @@ function productionHtml(source) {
   html = html.replace(/₹108\.00/g, '—');
   html = replaceOverlay(html, 'sessionsOv', '<div class="overlay" id="sessionsOv" onclick="bg(event,\'sessionsOv\')"><div class="sheet"><div class="handle"></div><h3>Login & Devices</h3><p class="desc">Loading active sessions…</p></div></div>');
   html = replaceOverlay(html, 'supportOv', '<div class="overlay" id="supportOv" onclick="bg(event,\'supportOv\')"><div class="sheet"><div class="handle"></div><h3>Help & Support</h3><p class="desc">Loading your support tickets…</p></div></div>');
-  html = html.replace(/<\/body>/i, '<script src="/digirupee-qr.js?v=20260915e" defer></script><script src="/digirupee-app.js?v=20260915e" defer></script><script src="/digirupee-rewards-assets.js?v=20260915e" defer></script><script src="/digirupee-rewards.js?v=20260915e" defer></script><script src="/digirupee-layout-v3.js?v=20260915e" defer></script><script src="/digirupee-enhancements.js?v=20260915e" defer></script></body>');
+  html = html.replace(/<\/body>/i, '<script src="/digirupee-qr.js?v=20260919a" defer></script><script src="/digirupee-app.js?v=20260919a" defer></script><script src="/digirupee-rewards-assets.js?v=20260919a" defer></script><script src="/digirupee-rewards.js?v=20260919a" defer></script><script src="/digirupee-layout-v3.js?v=20260919a" defer></script><script src="/digirupee-enhancements.js?v=20260919a" defer></script><script src="/digirupee-reward-hero-fix.js?v=20260919a" defer></script></body>');
   return html;
 }
 
@@ -160,6 +161,7 @@ async function rebuildAndroid() {
   const hostedRewardsAssetsJs = join(root, 'website/digirupee-rewards-assets.js');
   const hostedLayoutJs = join(root, 'website/digirupee-layout-v3.js');
   const hostedEnhancementsJs = join(root, 'website/digirupee-enhancements.js');
+  const hostedRewardHeroFixJs = join(root, 'website/digirupee-reward-hero-fix.js');
 
   await writeFile(hostedHtml, productionHtml(sourceHtml), 'utf8');
   await copyFile(canonicalAppJs, hostedJs);
@@ -167,6 +169,7 @@ async function rebuildAndroid() {
   await copyFile(canonicalRewardsJs, hostedRewardsJs);
   await copyFile(canonicalLayoutJs, hostedLayoutJs);
   await copyFile(canonicalEnhancementsJs, hostedEnhancementsJs);
+  await copyFile(canonicalRewardHeroFixJs, hostedRewardHeroFixJs);
   await writeFile(hostedRewardsAssetsJs, `window.__DIGIRUPEE_REWARD_ASSETS=${JSON.stringify(rewardAssets)};\n`, 'utf8');
 
   const publishedApk = join(root, 'dist/digiRupee.apk');
