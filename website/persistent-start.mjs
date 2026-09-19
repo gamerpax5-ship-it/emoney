@@ -111,7 +111,20 @@ async function optimizeDigiProductionAssets() {
   }
 
   const oldAuthenticated = `  async function authenticated(result) {\n    document.body.classList.add('digi-ready');\n    state.user = result.user || null;\n    state.profile = result.profile || null;\n    $('digiAuth').hidden = true;\n    const app = document.querySelector('.app'); if (app) app.style.display = '';\n    await refreshAll();\n  }`;
-  const synchronizedAuthenticated = `  async function authenticated(result) {\n    state.user = result.user || null;\n    state.profile = result.profile || null;\n\n    const initialPaths = ['/rates','/payout-methods','/orders','/rewards','/campaigns','/wheel','/referrals','/notifications/unread-count','/security/2fa/status'];\n    const initial = await Promise.allSettled(initialPaths.map(async path => {\n      const controller = new AbortController();\n      const timer = setTimeout(() => controller.abort(), 1800);\n      try { return await api(path, { signal:controller.signal }); }\n      finally { clearTimeout(timer); }\n    }));\n    const value = index => initial[index]?.status === 'fulfilled' ? initial[index].value : null;\n    if (value(0)) state.rates = value(0);\n    if (value(1)) state.methods = value(1).payoutMethods || [];\n    if (value(2)) state.orders = value(2).orders || [];\n    if (value(3)) state.rewards = value(3);\n    if (value(4)) state.campaigns = value(4).campaigns || [];\n    if (value(5)) state.wheel = value(5);\n    if (value(6)) state.referrals = value(6);\n    if (value(7)) state.unreadCount = Number(value(7).count || value(7).unreadCount || 0);\n    if (value(8)) state.twoFactor = value(8);\n    state.activeOrderId = activeOrder()?.id || null;\n    renderAll();\n\n    document.body.classList.add('digi-ready');\n    $('digiAuth').hidden = true;\n    const app = document.querySelector('.app'); if (app) app.style.display = '';\n    refreshAll();\n  }`;
+  const synchronizedAuthenticated = `  async function authenticated(result) {
+    state.user = result.user || null;
+    state.profile = result.profile || null;
+
+    // Paint the real app immediately after session validation. Data refresh stays in the background.
+    // This changes only startup sequencing; API/business logic remains unchanged.
+    state.activeOrderId = null;
+    renderAll();
+    document.body.classList.add('digi-ready');
+    $('digiAuth').hidden = true;
+    const app = document.querySelector('.app'); if (app) app.style.display = '';
+
+    refreshAll();
+  }`;
   if (source.includes(oldAuthenticated)) {
     source = source.replace(oldAuthenticated, synchronizedAuthenticated);
     changed = true;
