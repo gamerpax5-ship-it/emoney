@@ -26,7 +26,7 @@ const persistentNotificationGuard = `  const SEEN_NATIVE_NOTIFICATIONS_KEY = 'di
 if (enhancements.includes(oldNotificationGuard)) {
   enhancements = enhancements.replace(oldNotificationGuard, persistentNotificationGuard);
   await writeFile(enhancementsPath, enhancements, 'utf8');
-} else if (!enhancements.includes('SEEN_NATIVE_NOTIFICATIONS_KEY')) {
+} else if (!enhancements.includes('SEEN_NATIVE_NOTIFICATIONS_KEY') && !enhancements.includes('function notificationSeenKey') && !enhancements.includes('digirupee-seen-notifications-v1')) {
   throw new Error('digiRupee notification dedupe hook was not found');
 }
 
