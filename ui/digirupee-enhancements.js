@@ -226,14 +226,24 @@
       localStorage.setItem(seenNotificationKey, JSON.stringify(values));
     } catch {}
   }
+  function notificationSeenKey(item) {
+    const id = String(item?.id || '').trim();
+    if (id) return id;
+    return 'fallback:' + [item?.title, item?.message, item?.createdAt].map(value => String(value || '').trim()).join('|');
+  }
   function surfaceItems(items) {
     if (!window.DigiAndroid?.notify || !Array.isArray(items)) return;
     const seenNotifications = readSeenNotifications();
-    items.filter(item => !item.readAt && item.id && !seenNotifications.has(item.id)).slice(0,3).forEach(item => {
-      seenNotifications.add(item.id);
+    let changed = false;
+    items.filter(item => !item.readAt).slice(0,3).forEach(item => {
+      const key = notificationSeenKey(item);
+      if (!key || seenNotifications.has(key)) return;
+      // Persist before invoking the Android bridge so a rapid refresh/reopen cannot surface it twice.
+      seenNotifications.add(key);
+      changed = true;
       try { window.DigiAndroid.notify(String(item.title || 'digiRupee'), String(item.message || '')); } catch {}
     });
-    saveSeenNotifications(seenNotifications);
+    if (changed) saveSeenNotifications(seenNotifications);
   }
 
   const nativeFetch = window.fetch.bind(window);
