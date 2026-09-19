@@ -132,8 +132,10 @@ public class MainActivity extends Activity {
             }
         });
 
-        if (savedInstanceState == null) loadWebApp();
-        else webView.restoreState(savedInstanceState);
+        // Always start from the current hosted digiRupee document.
+        // Restoring a saved WebView DOM can briefly resurrect an older rendered
+        // shell before the current hosted UI scripts run.
+        loadWebApp();
     }
 
     private void createNotificationChannel() {
@@ -238,7 +240,10 @@ public class MainActivity extends Activity {
             appUrl = configuredAppUrl();
             appOrigin = Uri.parse(appUrl);
             showingOfflinePage = false;
-            webView.loadUrl(appUrl);
+            Uri freshUri = Uri.parse(appUrl).buildUpon()
+                    .appendQueryParameter("app_boot", "20260919d")
+                    .build();
+            webView.loadUrl(freshUri.toString());
         } catch (Exception error) {
             showOfflinePage();
         }
