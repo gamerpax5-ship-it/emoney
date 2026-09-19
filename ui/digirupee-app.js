@@ -161,12 +161,14 @@
   }
 
   async function authenticated(result) {
-    document.body.classList.add('digi-ready');
     state.user = result.user || null;
     state.profile = result.profile || null;
+    renderAll();
+    document.body.classList.add('digi-ready');
+    document.documentElement.classList.remove('digi-booting');
     $('digiAuth').hidden = true;
     const app = document.querySelector('.app'); if (app) app.style.display = '';
-    await refreshAll();
+    refreshAll();
   }
 
   async function sessionExpired() {
@@ -432,6 +434,7 @@
       await authenticated(result);
     } catch (error) {
       document.body.classList.add('digi-ready');
+      document.documentElement.classList.remove('digi-booting');
       const auth = $('digiAuth'); if (auth) auth.hidden = false;
       // A fresh install has no session. Show a clean login screen; real login errors still surface on submit.
       renderAuth('login');
