@@ -213,14 +213,14 @@
       #rewards .reward-v4-hero-gold .reward-v4-kicker{background:linear-gradient(120deg,#bd762330,#ffe39524)!important;color:#ffe79c!important;border-color:#daa752!important;box-shadow:inset 0 1px #ffecb33b}
       #rewards .reward-v4-hero-gold .reward-v4-explore{min-height:40px!important;padding:0 14px!important;font-size:11px!important;background:linear-gradient(115deg,#ffd354,#fff1a3 45%,#efb62d)!important;box-shadow:0 4px 17px #ffbc3140,inset 0 1px #fffbdc!important;white-space:nowrap}
       #rewards .reward-v4-hero-gold .reward-v4-mascot{top:6px!important;right:-4%!important;width:49%!important;height:calc(100% - 6px)!important;opacity:1!important;z-index:1!important;mask-image:linear-gradient(90deg,transparent,#000 13%)!important;-webkit-mask-image:linear-gradient(90deg,transparent,#000 13%)!important}
-      #rewards .reward-v4-hero-gold .reward-v4-mascot img{position:static!important;width:100%!important;height:100%!important;object-fit:cover!important;object-position:50% top!important;filter:drop-shadow(-5px 0 12px #ffce5b55)!important}
+      #rewards .reward-v4-hero-gold .reward-v4-mascot img{position:static!important;width:100%!important;height:100%!important;object-fit:cover!important;object-position:56% top!important;filter:drop-shadow(-5px 0 12px #ffce5b55)!important}
       #rewards .reward-v4-hero-gold .reward-v4-mascot.hidden{display:none!important}
-      #rewards .reward-v4-hero-gold .reward-v4-coin{background:radial-gradient(ellipse at 28% 20%,#fffbd4 0%,#ffe07e 27%,#f0b52c 51%,#ad6613 80%,#fff09e 100%);border:2px solid #ffe49b;box-shadow:inset 0 0 0 2px #ae761c,inset 0 0 0 3px #ffeaa0,0 4px 0 #8e4f13,0 0 18px #ffce6170}
+      #rewards .reward-v4-hero-gold .reward-v4-coin{z-index:3;background:radial-gradient(ellipse at 28% 20%,#fffbd4 0%,#ffe07e 27%,#f0b52c 51%,#ad6613 80%,#fff09e 100%);border:2px solid #ffe49b;box-shadow:inset 0 0 0 2px #ae761c,inset 0 0 0 3px #ffeaa0,0 4px 0 #8e4f13,0 0 18px #ffce6170}
       #rewards .reward-v4-hero-gold .reward-v4-coin:after{content:'';width:62%;height:62%;border:1px solid #fff0a6;border-radius:50%;box-shadow:inset 1px 1px 5px #995b1650}
-      #rewards .reward-v4-hero-gold .reward-v4-coin.c1{width:30px;height:34px;right:7px;top:15px;transform:rotate(22deg)}
-      #rewards .reward-v4-hero-gold .reward-v4-coin.c2{width:21px;height:24px;right:43%;top:17px;transform:rotate(-24deg)}
-      #rewards .reward-v4-hero-gold .reward-v4-coin.c3{width:17px;height:20px;right:39%;top:auto;bottom:20px;transform:rotate(-16deg)}
-      #rewards .reward-v4-hero-gold .reward-v4-treasure{position:absolute;z-index:4;right:-2px;bottom:-3px;width:37%;max-width:165px;height:auto;pointer-events:none;filter:drop-shadow(0 0 9px #ffc74455)}
+      #rewards .reward-v4-hero-gold .reward-v4-coin.c1{width:30px;height:34px;left:46%;right:auto;top:16px;transform:rotate(22deg)}
+      #rewards .reward-v4-hero-gold .reward-v4-coin.c2{width:21px;height:24px;left:16%;right:auto;top:25px;transform:rotate(-24deg)}
+      #rewards .reward-v4-hero-gold .reward-v4-coin.c3{width:17px;height:20px;left:34%;right:auto;top:auto;bottom:18px;transform:rotate(-16deg)}
+      #rewards .reward-v4-hero-gold .reward-v4-treasure{position:absolute;z-index:3;left:2%;right:auto;bottom:-5px;width:31%;max-width:145px;height:auto;pointer-events:none;opacity:.72;filter:drop-shadow(0 0 9px #ffc74455)}
       #rewards .reward-v4-hero-gold .reward-v4-treasure.hidden{display:none!important}
       #rewards .reward-v4-hero-gold .reward-v4-sparkles{position:absolute;inset:0;z-index:3;pointer-events:none}
       #rewards .reward-v4-sparkles i{position:absolute;width:10px;height:10px;background:#fff4bc;clip-path:polygon(50% 0,60% 39%,100% 50%,60% 61%,50% 100%,40% 61%,0 50%,40% 39%);filter:drop-shadow(0 0 4px #ffcb55)}
