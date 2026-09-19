@@ -917,9 +917,8 @@
   window.go = go;
   window.__digiLayoutV61 = { go, render, history, updateAmountUi };
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', install, { once:true });
-  } else {
-    install();
-  }
+  // This script is loaded with defer, so the DOM is already parsed.
+  // Install the production layout immediately instead of waiting for DOMContentLoaded,
+  // which is delayed by the large Rewards artwork script.
+  install();
 })();
