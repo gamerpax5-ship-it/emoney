@@ -211,13 +211,29 @@
     }
   }
 
-  const seenNotifications = new Set();
+  const seenNotificationKey = 'digirupee-seen-notifications-v1';
+  function readSeenNotifications() {
+    try {
+      const raw = localStorage.getItem(seenNotificationKey);
+      const value = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(value) ? value.filter(Boolean) : []);
+    } catch { return new Set(); }
+  }
+  function saveSeenNotifications(seen) {
+    try {
+      const values = Array.from(seen);
+      if (values.length > 300) values.splice(0, values.length - 300);
+      localStorage.setItem(seenNotificationKey, JSON.stringify(values));
+    } catch {}
+  }
   function surfaceItems(items) {
     if (!window.DigiAndroid?.notify || !Array.isArray(items)) return;
+    const seenNotifications = readSeenNotifications();
     items.filter(item => !item.readAt && item.id && !seenNotifications.has(item.id)).slice(0,3).forEach(item => {
       seenNotifications.add(item.id);
       try { window.DigiAndroid.notify(String(item.title || 'digiRupee'), String(item.message || '')); } catch {}
     });
+    saveSeenNotifications(seenNotifications);
   }
 
   const nativeFetch = window.fetch.bind(window);
