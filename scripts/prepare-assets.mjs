@@ -76,7 +76,7 @@ function productionHtml(source) {
   html = html.replace(/₹108\.00/g, '—');
   html = replaceOverlay(html, 'sessionsOv', '<div class="overlay" id="sessionsOv" onclick="bg(event,\'sessionsOv\')"><div class="sheet"><div class="handle"></div><h3>Login & Devices</h3><p class="desc">Loading active sessions…</p></div></div>');
   html = replaceOverlay(html, 'supportOv', '<div class="overlay" id="supportOv" onclick="bg(event,\'supportOv\')"><div class="sheet"><div class="handle"></div><h3>Help & Support</h3><p class="desc">Loading your support tickets…</p></div></div>');
-  html = html.replace(/<\/body>/i, '<script src="/digirupee-qr.js?v=20260919b" defer></script><script src="/digirupee-app.js?v=20260919b" defer></script><script src="/digirupee-rewards-assets.js?v=20260919b" defer></script><script src="/digirupee-rewards.js?v=20260919b" defer></script><script src="/digirupee-layout-v3.js?v=20260919b" defer></script><script src="/digirupee-enhancements.js?v=20260919b" defer></script><script src="/digirupee-reward-hero-fix.js?v=20260919b" defer></script></body>');
+  html = html.replace(/<\/body>/i, '<script src="/digirupee-qr.js?v=20260919c" defer></script><script src="/digirupee-app.js?v=20260919c" defer></script><script src="/digirupee-layout-v3.js?v=20260919c" defer></script><script src="/digirupee-rewards-assets.js?v=20260919c" defer></script><script src="/digirupee-rewards.js?v=20260919c" defer></script><script src="/digirupee-enhancements.js?v=20260919c" defer></script><script src="/digirupee-reward-hero-fix.js?v=20260919c" defer></script></body>');
   return html;
 }
 
