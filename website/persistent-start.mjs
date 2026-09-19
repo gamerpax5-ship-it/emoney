@@ -124,9 +124,42 @@ async function optimizeDigiProductionAssets() {
     changed = true;
   }
 
+  // Suppress duplicate native notifications without changing notification data/state.
+  // A notification is keyed by its title + message and is only surfaced once per installed WebView.
+  const duplicateNotificationGuard = `
+  ;(() => {
+    try {
+      const bridge = window.DigiAndroid;
+      if (!bridge || typeof bridge.notify !== 'function' || bridge.__digiSeenGuard) return;
+      const originalNotify = bridge.notify.bind(bridge);
+      const storageKey = 'digirupee-seen-native-notifications-v1';
+      const readSeen = () => {
+        try { const raw = localStorage.getItem(storageKey); const value = raw ? JSON.parse(raw) : []; return new Set(Array.isArray(value) ? value : []); } catch { return new Set(); }
+      };
+      const saveSeen = seen => {
+        try {
+          const values = Array.from(seen);
+          if (values.length > 300) values.splice(0, values.length - 300);
+          localStorage.setItem(storageKey, JSON.stringify(values));
+        } catch {}
+      };
+      bridge.notify = function(title, message) {
+        const key = String(title || 'digiRupee') + '::' + String(message || '');
+        const seen = readSeen();
+        if (seen.has(key)) return;
+        seen.add(key);
+        saveSeen(seen);
+        return originalNotify(title, message);
+      };
+      bridge.__digiSeenGuard = true;
+    } catch {}
+  })();
+  `;
+  source += duplicateNotificationGuard;
+
   if (changed) {
     await writeFile(appJsPath, source, 'utf8');
-    console.log('Optimized digiRupee fast boot, synchronized first UI state and adaptive background refresh');
+    console.log('Optimized digiRupee fast boot, synchronized first UI state, adaptive background refresh and duplicate notification guard');
   }
 }
 
