@@ -43,17 +43,19 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(Color.rgb(7, 5, 18));
-        getWindow().setNavigationBarColor(Color.rgb(7, 5, 18));
-        getWindow().getDecorView().setSystemUiVisibility(0);
+        getWindow().setStatusBarColor(Color.rgb(252, 251, 247));
+        getWindow().setNavigationBarColor(Color.rgb(252, 251, 247));
+        int systemFlags = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) systemFlags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        getWindow().getDecorView().setSystemUiVisibility(systemFlags);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) getWindow().setDecorFitsSystemWindows(false);
 
         createNotificationChannel();
 
         FrameLayout rootView = new FrameLayout(this);
-        rootView.setBackgroundColor(Color.rgb(7, 5, 18));
+        rootView.setBackgroundColor(Color.rgb(252, 251, 247));
         webView = new WebView(this);
-        webView.setBackgroundColor(Color.rgb(7, 5, 18));
+        webView.setBackgroundColor(Color.rgb(252, 251, 247));
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         webView.setVerticalScrollBarEnabled(false);
         webView.setHorizontalScrollBarEnabled(false);
@@ -84,7 +86,7 @@ public class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " digiRupee/1.0.9");
+        settings.setUserAgentString(settings.getUserAgentString() + " digiRupee/1.0.9 eMoney/" + BuildConfig.VERSION_NAME);
         webView.addJavascriptInterface(new DigiAndroidBridge(), "DigiAndroid");
 
         CookieManager cookieManager = CookieManager.getInstance();
@@ -142,7 +144,7 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager == null) return;
-        NotificationChannel channel = new NotificationChannel(NOTIFICATION_CHANNEL, "digiRupee updates", NotificationManager.IMPORTANCE_HIGH);
+        NotificationChannel channel = new NotificationChannel(NOTIFICATION_CHANNEL, "eMoney updates", NotificationManager.IMPORTANCE_HIGH);
         channel.setDescription("Trade, payout, reward and account updates");
         manager.createNotificationChannel(channel);
     }
@@ -163,8 +165,8 @@ public class MainActivity extends Activity {
         android.app.Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new android.app.Notification.Builder(this, NOTIFICATION_CHANNEL)
                 : new android.app.Notification.Builder(this);
-        builder.setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle(title == null || title.isEmpty() ? "digiRupee" : title)
+        builder.setSmallIcon(R.drawable.ic_emoney_notification)
+                .setContentTitle(title == null || title.isEmpty() ? "eMoney" : title)
                 .setContentText(message == null ? "" : message)
                 .setStyle(new android.app.Notification.BigTextStyle().bigText(message == null ? "" : message))
                 .setAutoCancel(true)
@@ -183,7 +185,7 @@ public class MainActivity extends Activity {
             if (!raw.startsWith(REFERRAL_MARKER)) return "";
             String code = raw.substring(REFERRAL_MARKER.length()).trim();
             if (!code.matches("DGR[A-F0-9]{10}")) return "";
-            clipboard.setPrimaryClip(ClipData.newPlainText("digiRupee", ""));
+            clipboard.setPrimaryClip(ClipData.newPlainText("eMoney", ""));
             return code;
         } catch (Exception ignored) {
             return "";
@@ -191,6 +193,28 @@ public class MainActivity extends Activity {
     }
 
     private final class DigiAndroidBridge {
+        @JavascriptInterface
+        public void copyText(String value) {
+            if (value == null || value.length() > 1000000) return;
+            runOnUiThread(() -> {
+                ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                if (clipboard != null) clipboard.setPrimaryClip(ClipData.newPlainText("eMoney", value));
+            });
+        }
+
+        @JavascriptInterface
+        public void shareText(String value) {
+            if (value == null || value.length() > 1000000) return;
+            runOnUiThread(() -> {
+                try {
+                    Intent share = new Intent(Intent.ACTION_SEND);
+                    share.setType("text/plain");
+                    share.putExtra(Intent.EXTRA_TEXT, value);
+                    startActivity(Intent.createChooser(share, "Share from eMoney"));
+                } catch (Exception ignored) { }
+            });
+        }
+
         @JavascriptInterface
         public void requestNotificationPermission() {
             runOnUiThread(MainActivity.this::requestNotificationPermission);
@@ -211,7 +235,7 @@ public class MainActivity extends Activity {
         String configured = BuildConfig.WEB_APP_URL == null ? "" : BuildConfig.WEB_APP_URL.trim();
         Uri configuredUri = Uri.parse(configured);
         if (!"https".equalsIgnoreCase(configuredUri.getScheme()) || configuredUri.getHost() == null) {
-            throw new IllegalStateException("digiRupee production URL must use HTTPS");
+            throw new IllegalStateException("eMoney production URL must use HTTPS");
         }
         String path = configuredUri.getPath();
         if (path == null || path.isEmpty() || path.endsWith("/")) {
@@ -241,7 +265,7 @@ public class MainActivity extends Activity {
             appOrigin = Uri.parse(appUrl);
             showingOfflinePage = false;
             Uri freshUri = Uri.parse(appUrl).buildUpon()
-                    .appendQueryParameter("app_boot", "20260919d")
+                    .appendQueryParameter("app_boot", "emoney-" + BuildConfig.VERSION_NAME)
                     .build();
             webView.loadUrl(freshUri.toString());
         } catch (Exception error) {
@@ -254,10 +278,10 @@ public class MainActivity extends Activity {
         showingOfflinePage = true;
         String retryUrl = appUrl == null ? "" : appUrl.replace("\\", "%5C").replace("'", "%27");
         String html = "<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-                + "<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#070512;color:#fff;font-family:Arial,sans-serif}"
-                + ".box{max-width:360px;padding:24px;text-align:center}h1{font-size:22px}p{color:#c9c4df;line-height:1.5}"
-                + "button{border:0;border-radius:8px;padding:13px 18px;background:#7c4dff;color:#fff;font-weight:700}</style></head>"
-                + "<body><div class=\"box\"><h1>digiRupee could not connect</h1><p>An internet connection is required to use the secure application.</p>"
+                + "<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#fcfbf7;color:#102b22;font-family:Arial,sans-serif}"
+                + ".box{max-width:360px;padding:24px;text-align:center}h1{font-size:22px}p{color:#596b63;line-height:1.5}"
+                + "button{border:0;border-radius:8px;padding:13px 18px;background:#075537;color:#fff;font-weight:700}</style></head>"
+                + "<body><div class=\"box\"><h1>eMoney could not connect</h1><p>An internet connection is required to use the secure application.</p>"
                 + "<button onclick=\"location.href='" + retryUrl + "'\">Retry</button></div></body></html>";
         webView.loadDataWithBaseURL(LOCAL_OFFLINE_URL, html, "text/html", "UTF-8", null);
     }

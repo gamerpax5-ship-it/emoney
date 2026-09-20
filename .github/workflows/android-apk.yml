@@ -1,13 +1,24 @@
-name: Build digiRupee Android APK
+name: Build eMoney Android APK
 
 on:
   push:
+    branches: [ main, emoney-rebrand ]
+    paths:
+      - 'android/**'
+      - 'ui/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'website/persistent-start.mjs'
+      - 'package.json'
+      - '.github/workflows/android-apk.yml'
+  pull_request:
     branches: [ main ]
     paths:
       - 'android/**'
       - 'ui/**'
-      - 'scripts/prepare-assets.mjs'
-      - 'package.json'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'website/persistent-start.mjs'
       - '.github/workflows/android-apk.yml'
   workflow_dispatch:
 
@@ -25,25 +36,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.20.2'
+
       - name: Test backend and digiRupee flows
         run: npm test
 
       - name: Verify digiRupee branding and live URL config
         run: |
           test -s android/app/src/main/res/drawable-nodpi/digirupee_logo.webp
-          grep -q 'digiRupee' android/app/src/main/res/values/strings.xml
-          grep -q 'digirupee_logo' android/app/src/main/AndroidManifest.xml
+          grep -q 'eMoney' android/app/src/main/res/values/strings.xml
+          grep -q 'ic_emoney' android/app/src/main/AndroidManifest.xml
           grep -q 'WEB_APP_URL' android/app/build.gradle.kts
           test -s android/app/src/main/assets/wtron-parts/part-000
           grep -q 'digirupee-app.html' android/app/src/main/java/com/loktron/tronpay/MainActivity.java
           ! grep -q 'wtron.html' android/app/src/main/java/com/loktron/tronpay/MainActivity.java
 
       - name: Prepare hosted digiRupee app and offline asset
-        run: npm run prepare-assets
+        run: |
+          npm run prepare-assets
+          node scripts/prepare-emoney.mjs
 
       - name: Verify production app has no prototype business state
         run: |
           test -s website/digirupee-app.html
+          ! grep -Eiq 'Demo@12345|demo@emoney|startPreview|PREVIEW-ONLY-NOT-A-REAL' website/digirupee-app.html
           test -s website/digirupee-app.js
           test -s website/digirupee-qr.js
           ! grep -Eiq 'wtronV11|makeInitial|demoInvite|demoReferralTrade|simulateSent|simulateExpire|simulateLate|wtron\.example|rohitp|9876543210|Devid Europe' website/digirupee-app.html website/digirupee-app.js
@@ -110,15 +129,20 @@ jobs:
           fi
           test -s dist/digiRupee.apk
 
-      - name: Upload digiRupee APK artifacts
+      - name: Add eMoney display filenames
+        run: |
+          cp dist/digiRupee.apk dist/eMoney.apk
+          cp dist/digiRupee-debug.apk dist/eMoney-debug.apk
+
+      - name: Upload eMoney APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: digiRupee-apks
+          name: eMoney-apks
           path: dist/*.apk
           if-no-files-found: error
 
       - name: Publish website APK download
-        if: ${{ github.ref == 'refs/heads/main' }}
+        if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
