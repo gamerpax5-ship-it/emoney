@@ -172,6 +172,9 @@ await import('../scripts/enable-permanent-rewards.mjs');
 await import('../scripts/enable-deferred-referrals.mjs');
 await import('../scripts/enable-device-referral-fixes.mjs');
 await optimizeDigiProductionAssets();
+// Finalize approved eMoney visuals AFTER all legacy UI and business transforms.
+// This build does not alter server-runtime.mjs or persistence.
+await (await import('../scripts/prepare-emoney.mjs')).buildEMoney();
 await import('./server-runtime.mjs');
 
 if (persistenceEnabled) {

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#fcfbf7">
+<meta name="description" content="eMoney mobile app. Sell USDT, track INR payouts and manage your account."><title>eMoney · Mobile App</title>
+<link rel="icon" href="{{ASSET:inline0}}">
+<!-- eMoney production client. Real same-origin APIs only. -->
+<!-- EMONEY_STYLE -->
+</head>
+<body class="mobile-app">
+<div class="status-bar" aria-hidden="true"><b>9:41</b><span class="status-signals"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 7a18 18 0 0 1 22 0L12 21 1 7Z"/></svg><svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 22 22 2v20H2Z"/></svg><svg viewBox="0 0 16 24" fill="currentColor"><path d="M5 0h6v3h3v21H2V3h3Z"/></svg>100%</span></div>
+<section id="authView" class="auth">
+ <div class="auth-hero"><img src="{{ASSET:loginHero}}" alt="eMoney. More Value. A Brighter You. Secure transfers, brighter tomorrows." draggable="false"><button class="hero-help" data-action="auth-help" aria-label="Need help?">Need help?</button></div>
+ <div class="auth-card">
+ <h2 id="authTitle">Welcome Back</h2><p id="authSub">Sign in to your eMoney account</p>
+ <div id="authTabs" class="auth-tabs" role="tablist"><button id="loginTab" type="button" role="tab">Sign In</button><button id="registerTab" type="button" role="tab">Create Account</button></div>
+ <form id="authForm">
+  <div id="registerFields" class="hidden">
+   <div class="auth-form-field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="7" r="4"/><path d="M4 22v-3a8 8 0 0 1 16 0v3"/></svg><div class="auth-field-body"><label for="fullName">Full Name</label><input id="fullName" placeholder="Your full name" autocomplete="name" maxlength="80"></div></div>
+   <div class="auth-form-field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/></svg><div class="auth-field-body"><label for="mobile">Mobile Number</label><input id="mobile" placeholder="Your mobile number" autocomplete="tel" inputmode="tel" maxlength="16"></div></div>
+  </div>
+  <div class="auth-form-field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m3 5 9 8 9-8"/></svg><div class="auth-field-body"><label for="email">Email Address</label><input id="email" type="email" autocomplete="username" placeholder="Enter your email address" required></div></div>
+  <div class="auth-form-field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="5" y="10" width="14" height="12" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4M12 14v4"/></svg><div class="auth-field-body"><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" minlength="8" placeholder="Enter your password" required></div><button class="password-toggle" id="passwordToggle" type="button" aria-label="Show password"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 4 21 21M3 8c2-2 5-4 9-4 6 0 10 8 10 8s-2 4-5 6M13 20C6 20 2 12 2 12m8-3a4 4 0 0 0 5 6"/></svg></button></div>
+  <div class="auth-form-field hidden" id="refField"><div class="auth-field-body"><label for="referral">Referral Code · Optional</label><input id="referral" placeholder="Enter referral code" maxlength="30"></div></div>
+  <div class="auth-utilities"><label><input type="checkbox" id="rememberEmail" checked>Remember email</label><button type="button" data-action="forgot">Forgot password?</button></div>
+  <div id="authMessage" class="auth-message" role="alert"></div>
+  <button class="btn btn-primary full auth-submit-line" id="authSubmit" type="submit">Sign In →</button>
+ </form>
+ <form id="twoFactorForm" class="hidden"><div class="field"><label for="twoFactorCode">Authenticator or recovery code</label><input id="twoFactorCode" class="control" autocomplete="one-time-code" placeholder="Enter your code" required></div><div id="twoFactorMessage" role="alert" class="auth-message"></div><button class="btn btn-primary full" type="submit">Verify & Continue</button><button class="btn-text full" id="backLogin" type="button">Back to Sign In</button></form>
+ <div class="auth-divider" id="newAccountLabel">New to eMoney?</div><button id="alternateAuth" type="button" class="btn full register-button">Create Account</button>
+ <button class="auth-safety" data-action="auth-help"><span class="safe-icon"><svg viewBox="0 0 24 24" fill="#075537" stroke="#075537" stroke-width="1.5"><path d="m12 2 9 4v6c0 6-9 10-9 10S3 18 3 12V6Z"/><path d="m8 12 3 3 5-6" stroke="white" fill="none"/></svg></span><span><b>Your Security Matters</b><small>Secure sign-in and optional 2FA<br>to help protect your account.</small></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 5 7 7-7 7"/></svg></button>
+ </div>
+ 
+ <div class="auth-foot"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="10" width="14" height="12" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4" fill="none" stroke="currentColor" stroke-width="2"/></svg>More Value. A Brighter You.</div>
+ 
+</section>
+<section id="appView" class="app hidden">
+ <main class="main"><header class="topbar"><span id="topTitle" hidden>Home</span><button class="brand-button" id="brandHome" aria-label="eMoney Home"><img class="brand-image" src="{{ASSET:logo}}" alt="eMoney · More Value. A Brighter You."></button><div class="top-actions"><span id="modePill" hidden>Connected</span><button class="icon-btn" data-action="notifications" aria-label="Notifications"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 9a6 6 0 0 1 12 0c0 6 3 7 3 8H3c0-1 3-2 3-8ZM10 21h4"/></svg><span id="notifDot" class="notif-dot"></span></button><button id="topAvatar" class="top-avatar" data-action="account" aria-label="Your profile"></button></div></header>
+ <div class="content"><section id="page-overview" class="page active" aria-label="Home"></section><section id="page-sell" class="page" aria-label="Sell USDT"></section><section id="page-orders" class="page" aria-label="Orders"></section><section id="page-rewards" class="page" aria-label="Rewards"></section><section id="page-profile" class="page" aria-label="Profile"></section></div></main>
+ <nav id="mobileNav" class="mobile-nav" aria-label="App navigation"></nav>
+</section>
+<div id="modalBackdrop" class="modal-backdrop"><section class="modal" id="modal" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="modalTitle"></section></div><div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+
+<!-- EMONEY_SCRIPTS -->
+</body></html>
