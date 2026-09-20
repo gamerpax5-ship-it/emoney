@@ -62,8 +62,8 @@
         button.textContent = 'Preparing download…';
         await copyReferralMarker();
         const target = validReferral
-          ? `/download/digirupee.apk?ref=${encodeURIComponent(validReferral)}`
-          : '/download/digirupee.apk';
+          ? `/download/emoney.apk?ref=${encodeURIComponent(validReferral)}`
+          : '/download/emoney.apk';
         location.href = target;
         setTimeout(() => {
           button.disabled = false;

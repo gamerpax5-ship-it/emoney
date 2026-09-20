@@ -4650,7 +4650,7 @@ const server = http.createServer(async (req, res) => {
     ]);
     let hostRelativePath = '';
 
-    if (isDigiRupeeHost && pathname === '/download/digirupee.apk') {
+    if (isDigiRupeeHost && ['/download/digirupee.apk', '/download/emoney.apk'].includes(pathname)) {
       const candidates = [
         join(root, '..', 'dist', 'digiRupee.apk'),
         join(root, '..', 'dist', 'digiRupee-debug.apk')
@@ -4660,7 +4660,7 @@ const server = http.createServer(async (req, res) => {
           const apk = await readFile(candidate);
           res.writeHead(200, {
             'Content-Type': 'application/vnd.android.package-archive',
-            'Content-Disposition': 'attachment; filename="digiRupee.apk"',
+            'Content-Disposition': `attachment; filename="${pathname.endsWith('/emoney.apk') ? 'eMoney' : 'digiRupee'}.apk"`,
             'Content-Length': String(apk.length),
             'Cache-Control': 'no-store',
             'X-Content-Type-Options': 'nosniff'
@@ -4670,7 +4670,7 @@ const server = http.createServer(async (req, res) => {
           // Try the next installable build.
         }
       }
-      return send(res, 503, { error: 'digiRupee APK is being prepared. Please try again shortly.' });
+      return send(res, 503, { error: 'eMoney APK is being prepared. Please try again shortly.' });
     }
 
     const legacyAdminPath = pathname === '/admin/' || pathname === '/admin.html' || pathname === '/digirupee-admin.html';
