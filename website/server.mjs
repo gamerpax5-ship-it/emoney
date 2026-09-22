@@ -4591,7 +4591,7 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     const requestHost = String(req.headers['x-forwarded-host'] || req.headers.host || '')
       .split(',')[0].trim().toLowerCase().replace(/:\d+$/, '');
-    const isDigiRupeeHost = requestHost === 'digirupee.loktron.com';
+    const isDigiRupeeHost = ['digirupee.loktron.com', 'emoney-production-3e0a.up.railway.app'].includes(requestHost);
     const isDigiRupeeClient = /\bdigiRupee\/[0-9.]+/i.test(String(req.headers['user-agent'] || ''));
 
     if (url.pathname === '/health' || url.pathname === '/ready') {
