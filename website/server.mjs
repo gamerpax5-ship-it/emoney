@@ -4597,7 +4597,13 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/health' || url.pathname === '/ready') {
       const persistenceConfigured = !!(supabaseUrl && supabaseSecretKey && persistenceSecret);
       const chainConfigurationReady = tronVerifyMode === 'required' && !!tronApiKey && isValidTronAddress(tronUsdtContract);
-      const ready = auditHealthy() && (!production || (!!process.env.SESSION_SECRET && adminConfigured && persistenceConfigured && chainConfigurationReady));
+      const twoFactorEncryptionConfigured = !!digiTwoFactorEncryptionKey;
+      const productionConfigurationReady = !!process.env.SESSION_SECRET
+        && adminConfigured
+        && persistenceConfigured
+        && chainConfigurationReady
+        && twoFactorEncryptionConfigured;
+      const ready = auditHealthy() && (!production || productionConfigurationReady);
       const strict = url.pathname === '/ready';
       return send(res, strict && !ready ? 503 : 200, {
         ok: true,
@@ -4615,6 +4621,7 @@ const server = http.createServer(async (req, res) => {
           sessionSecret: !!process.env.SESSION_SECRET,
           adminConfigured,
           persistenceConfigured,
+          twoFactorEncryptionConfigured,
           tronRequired: tronVerifyMode === 'required',
           tronApiKeyConfigured: !!tronApiKey,
           tronContractConfigured: isValidTronAddress(tronUsdtContract),

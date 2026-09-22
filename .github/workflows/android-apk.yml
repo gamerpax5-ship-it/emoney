@@ -124,10 +124,20 @@ jobs:
         run: |
           if test -s dist/digiRupee-release-signed.apk; then
             cp dist/digiRupee-release-signed.apk dist/digiRupee.apk
+            echo "APK_PUBLICATION_MODE=signed-release" >> "$GITHUB_ENV"
           else
             cp dist/digiRupee-debug.apk dist/digiRupee.apk
+            echo "APK_PUBLICATION_MODE=debug-fallback" >> "$GITHUB_ENV"
           fi
           test -s dist/digiRupee.apk
+
+      - name: Report APK signing mode
+        run: |
+          if test "$HAS_ANDROID_SIGNING" = "true"; then
+            echo "Android APK signing: protected signing secrets configured; signed release is available." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Android APK signing: protected signing secrets are absent; debug fallback is available for testing only." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Add eMoney display filenames
         run: |
@@ -141,8 +151,16 @@ jobs:
           path: dist/*.apk
           if-no-files-found: error
 
-      - name: Publish website APK download
+      - name: Guard public APK publication
         if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+        run: |
+          if test "$HAS_ANDROID_SIGNING" != "true"; then
+            echo "::error::Public APK publication requires all Android signing secrets. Debug APK artifacts were retained, but no production APK will be published."
+            exit 1
+          fi
+
+      - name: Publish website APK download
+        if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && env.HAS_ANDROID_SIGNING == 'true' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

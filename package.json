@@ -12,6 +12,6 @@
     "test:website": "node --test tests/website-flow.test.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": "20.x"
   }
 }
