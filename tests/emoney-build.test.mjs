@@ -15,8 +15,16 @@ test('production app parses and has no demo authentication',()=>{
  for(const re of [/demoApi\s*\(/,/startPreview\s*\(/,/demo@emoney/,/Demo@12345/,/const\s+demo\s*=/,/previewAccounts/,/data-demo-advance/])assert.doesNotMatch(app,re);
  assert.match(app,/void boot\(\)/);
 });
-test('same-origin cookie API contract and protocol guard retained',()=>{
+test('same-origin cookie API contract and production readiness guard retained',async()=>{
  assert.match(app,/fetch\('\/api\/digirupee' \+ path/);assert.match(app,/credentials: 'include'/);assert.ok(app.includes("test(location.protocol)"));assert.doesNotMatch(app,/SUPABASE_SECRET|ADMIN_PASSWORD|TRONGRID_API_KEY/);
+ const server=await readFile(join(root,'website/server.mjs'),'utf8');
+ assert.match(server,/const productionConfigurationReady =/);
+ assert.match(server,/twoFactorEncryptionConfigured/);
+ assert.match(server,/strict && !ready \? 503 : 200/);
+ const railway=JSON.parse(await readFile(join(root,'railway.json'),'utf8'));
+ assert.equal(railway.deploy.healthcheckPath,'/ready');
+ const migration=await readFile(join(root,'supabase/migrations/20260915000100_loktron_persistence.sql'),'utf8');
+ for(const statement of ['create table if not exists public.loktron_state','create table if not exists public.loktron_files','enable row level security','revoke all on table public.loktron_state from anon, authenticated','revoke all on table public.loktron_files from anon, authenticated','grant all on table public.loktron_state to service_role','grant all on table public.loktron_files to service_role']) assert.match(migration,new RegExp(statement.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i'));
 });
 test('all approved artwork bytes have matching SHA-256',async()=>{
  const hashes=JSON.parse(await readFile(join(source,'asset-sha256.json'),'utf8'));assert.equal(Object.keys(hashes).length,14);
