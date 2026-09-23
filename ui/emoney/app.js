@@ -15,7 +15,7 @@ const dt = v => v ? new Date(v).toLocaleString('en-IN',{day:'2-digit',month:'sho
 const activeStatuses = ['Awaiting Deposit','Detected','Confirming','USDT Confirmed','INR Processing','Late Review'];
 const bankDistributionStatuses = new Set(['Detected','Confirming','USDT Confirmed','INR Processing','Late Review']);
 const icon = name => ico(name);
-const state = {mode:'live',authMode:'login',challengeId:null,user:null,profile:null,rates:null,methods:[],orders:[],rewards:{balance:0,lifetimeEarned:0,ledger:[]},campaigns:[],wheel:null,referrals:null,tickets:[],notifications:[],unreadCount:0,twoFactor:null,sessions:[],page:'overview',sellType:'UPI',selectedMethodId:null,quote:null,orderFilter:'All',refresh:null};
+const state = {mode:'live',authMode:'login',challengeId:null,user:null,profile:null,rates:null,methods:[],orders:[],rewards:{balance:0,lifetimeEarned:0,ledger:[]},campaigns:[],wheel:null,referrals:null,tickets:[],notifications:[],unreadCount:0,twoFactor:null,sessions:[],page:'overview',_wheelAngle:0,_wheelResult:null,sellType:'UPI',selectedMethodId:null,quote:null,orderFilter:'All',refresh:null};
 
 function toast(message,error=false){const t=$('#toast');t.textContent=message;t.className='toast show'+(error?' error':'');clearTimeout(t._t);t._t=setTimeout(()=>t.className='toast',2600)}
 function applyTheme(){const dark=themeMode==='dark'||(themeMode==='system'&&window.matchMedia?.('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.theme=dark?'dark':'light';const meta=document.querySelector('meta[name="theme-color"]');if(meta)meta.content=dark?'#0d1a15':'#fcfbf7'}
@@ -53,7 +53,7 @@ function showAuth(message = '') {
   clearInterval(state.refresh);
   closeModal();
   // Do not leave another user's rewards, referrals, bank data or security secrets in the DOM.
-  Object.assign(state, {user:null,profile:null,methods:[],orders:[],rates:null,rewards:{balance:0,lifetimeEarned:0,ledger:[]},campaigns:[],wheel:null,permanent:null,referrals:null,tickets:[],notifications:[],unreadCount:0,twoFactor:null,sessions:[],quote:null,challengeId:null,page:'overview',_amount:'',_pendingOrder:null,_orderKey:null,_spinKey:null,_creating:false,_spinning:false,_claiming:false,_activeOrderId:null,_orderSearch:'',orderFilter:'All'});
+  Object.assign(state, {user:null,profile:null,methods:[],orders:[],rates:null,rewards:{balance:0,lifetimeEarned:0,ledger:[]},campaigns:[],wheel:null,permanent:null,referrals:null,tickets:[],notifications:[],unreadCount:0,twoFactor:null,sessions:[],quote:null,challengeId:null,page:'overview',_amount:'',_pendingOrder:null,_orderKey:null,_spinKey:null,_creating:false,_spinning:false,_claiming:false,_activeOrderId:null,_orderSearch:'',_wheelAngle:0,_wheelResult:null,orderFilter:'All'});
   document.body.classList.remove('reward-mode');
   for (const node of $$('.page')) node.replaceChildren();
   $('#topAvatar').replaceChildren(); $('#notifDot').classList.add('hidden');
@@ -168,22 +168,38 @@ async function claimTask(taskId,campaignId) {
   catch(error){toast(error.message,true);}finally{state._claiming=false;}
 }
 async function spinWheel() {
-  if(!state.wheel?.canSpin||state._spinning)return;state._spinning=true;const epoch=refreshVersion;
-  const button=$('#spinBtn');if(button){button.disabled=true;button.textContent='Revealing…';}
+  if(!state.wheel?.canSpin||state._spinning)return;
+  state._spinning=true;state._wheelResult=null;const epoch=refreshVersion;
+  renderRewards();
   try {
     if(!state._spinKey)state._spinKey=[...crypto.getRandomValues(new Uint8Array(18))].map(b=>b.toString(16).padStart(2,'0')).join('');
-    const result=await api('/wheel/spin',{method:'POST',headers:{'Idempotency-Key':state._spinKey}});
-    state._spinKey=null;
-    const reward=Number(result.result?.rewardAmount||0);
-    const wheel=document.querySelector('.wheel-banner>img');
-    if(wheel){wheel.style.transition='transform 1.8s ease-out';wheel.style.transform='rotate(1440deg)';}
-    await new Promise(resolve=>setTimeout(resolve,1800));
+    const response=await api('/wheel/spin',{method:'POST',headers:{'Idempotency-Key':state._spinKey}});
+    const result=response.result||{};
+    const segments=(state.wheel?.segments||[]).filter(segment=>segment&&segment.id);
+    const winnerIndex=segments.findIndex(segment=>String(segment.id)===String(result.segmentId));
+    if(winnerIndex<0)throw new Error('The server returned an unknown wheel result. Please retry.');
+    const wheel=$('#spinWheel');
+    const segmentAngle=360/segments.length;
+    const winnerCenter=-90+(winnerIndex+.5)*segmentAngle;
+    const currentAngle=Number(state._wheelAngle||0);
+    const correction=(((-90-winnerCenter-currentAngle)%360)+360)%360;
+    const finalAngle=currentAngle+5*360+correction;
+    const reduced=!!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const duration=reduced?180:4200;
+    if(wheel){
+      wheel.classList.remove('is-pending');wheel.style.animation='none';wheel.style.transition=`transform ${duration}ms cubic-bezier(.12,.72,.18,1)`;
+      requestAnimationFrame(()=>{wheel.style.transform=`rotate(${finalAngle}deg)`});
+    }
+    state._wheelAngle=finalAngle;
+    await new Promise(resolve=>setTimeout(resolve,duration+40));
     if(epoch!==refreshVersion||!state.user)return;
-    await refreshAll(true);
-    modal('Your reward result','The result is provided by the server.',`<div style="text-align:center;padding:20px"><div class="detail-total">${num(reward)} USDT</div><p>See your reward ledger for the credit.</p><button class="btn btn-primary full" data-close>Back to Rewards</button></div>`);
-  } catch(error){if(epoch===refreshVersion){if(error.status>=400&&error.status<500&&error.status!==429)state._spinKey=null;toast(error.message,true);renderRewards();}}
-  finally{if(epoch===refreshVersion)state._spinning=false;}
+    state._spinKey=null;state._wheelResult=result;state._spinning=false;
+    await refreshAll(true);renderRewards();
+  } catch(error){
+    if(epoch===refreshVersion){if(error.status>=400&&error.status<500&&error.status!==429)state._spinKey=null;state._spinning=false;renderRewards();toast(error.message,true);}
+  }
 }
+
 
 function bindActions(){
  // Actions use the single delegated listener below; no duplicate handlers.
@@ -403,12 +419,14 @@ function renderOverview(){
  const c=completed(),payout=c.reduce((s,o)=>s+Number(o.payout?.paidInrPaise!=null?o.payout.paidInrPaise/100:o.inrAmount||0),0),volume=c.reduce((s,o)=>s+Number(o.usdtAmount||0),0),name=(state.profile?.fullName||'there').split(' ')[0];
  $('#page-overview').innerHTML=`<div class="page-heading home-heading"><div class="hello">Good to see you,</div><h1>${esc(name)}<span class="wave" aria-hidden="true">👋</span></h1><p>Smarter Digital Money. Brighter Possibilities.</p></div>
  <div class="money-summary dark-card"><div class="money-left"><div class="eyebrow">Total INR Received <button id="hideAmounts" aria-label="${state._hideBalance?'Show':'Hide'} amounts">${ico('eye')}</button></div><div class="large-currency">${state._hideBalance?'₹••,•••':money(payout)}</div><div class="volume-pill"><span class="mini-token">₮</span>${state._hideBalance?'••••':num(volume)} USDT <span style="color:#c8dacd"> · completed</span></div></div><button class="money-right" data-jump="rewards">${uiIcon('bars')}<span>Total Rewards</span><strong>${num(state.rewards?.balance)} <small>USDT</small></strong><em>Keep going! ${uiIcon('chevron')}</em></button></div>
- <div class="card rates-card"><div class="rates-head"><strong>Live USDT Rates</strong><button class="rates-refresh" data-action="rates">Refresh ${ico('refresh')}</button></div><div class="rate-grid"><div class="rate-card"><span class="rate-card-icon">${uiIcon('send')}</span><div><b>UPI</b><strong>${money(state.rates?.rates?.upi)}</strong><small>Minimum ${num(state.rates?.limits?.upiMinUsdt)} USDT</small></div></div><div class="rate-card"><span class="rate-card-icon bank">${uiIcon('bank')}</span><div><b>Bank</b><strong>${money(state.rates?.rates?.bank)}</strong><small>Minimum ${num(state.rates?.limits?.bankMinUsdt)} USDT</small></div></div></div></div>${rewardTickerMarkup()}
+ <div class="card rates-card"><div class="rates-head"><strong>Live USDT Rates</strong><button class="rates-refresh" data-action="rates">Refresh ${ico('refresh')}</button></div><div class="rate-grid"><div class="rate-card"><span class="rate-card-icon">${uiIcon('send')}</span><div><b>UPI</b><strong>${money(state.rates?.rates?.upi)}</strong><small>Minimum ${num(state.rates?.limits?.upiMinUsdt)} USDT</small></div></div><div class="rate-card"><span class="rate-card-icon bank">${uiIcon('bank')}</span><div><b>Bank</b><strong>${money(state.rates?.rates?.bank)}</strong><small>Minimum ${num(state.rates?.limits?.bankMinUsdt)} USDT</small></div></div></div></div>${rewardTickerMarkup()}${nextBonusMarkup()}
  <button class="main-sell dark-card" data-jump="sell"><span class="plane">${uiIcon('send')}</span><span><b>Sell USDT</b><small>Receive INR in your UPI or bank account</small></span>${uiIcon('chevron')}</button>
+ ${accountSnapshotMarkup()}
  <div class="card recent-card"><div class="section-head"><h3>Recent Orders</h3><button class="btn-text" data-jump="orders">View All ${uiIcon('chevron')}</button></div><div class="order-list">${state.orders.slice(0,3).map(quickOrderRow).join('')||empty('Your orders will appear here.')}</div></div>
  <button class="refer-teaser" data-jump="rewards">${art('giftSmall','','Gift box')}<span><b>Refer & Earn Together</b><small>Invite your friends. Track your referral rewards.</small></span>${uiIcon('chevron')}</button>`;
  $('#hideAmounts').onclick=()=>{state._hideBalance=!state._hideBalance;renderOverview()};bindJumps();bindOrders();bindActions();
 }
+
 function renderSell(){
  const orderLocked=!!state._pendingOrder||state._creating;
  const methods=eligibleMethods(),type=state.sellType,min=Number(state.rates?.limits?.[type==='UPI'?'upiMinUsdt':'bankMinUsdt']||0),rate=Number(state.rates?.rates?.[type.toLowerCase()]||0),amount=Number(state._amount||0),total=Math.round(amount*rate*100)/100;
@@ -451,22 +469,79 @@ function visibleRewardTasks(){
   return (Array.isArray(c.tasks)?c.tasks:[]).filter(t=>t.enabled!==false&&t.active!==false&&(!t.startsAt||Number(t.startsAt)<=now)&&(!t.endsAt||Number(t.endsAt)>=now)).map(t=>({...t,campaignTitle:c.title||'Reward campaign',campaignId:t.campaignId||c.id}));
  });
 }
+function permanentRewardCards(){
+ const p=state.permanent;if(!p||p.enabled===false)return [];
+ const cards=[],joining=p.joiningBonus||{},joiningAmount=Number(joining.amountUsdt||0);
+ if(joiningAmount>0)cards.push({kind:'joining',title:'Welcome Bonus',amountUsdt:joiningAmount,credited:!!joining.credited});
+ for(const tier of Array.isArray(p.tiers)?p.tiers:[]){
+  const threshold=Number(tier.thresholdUsdt||0),reward=Number(tier.rewardUsdt||0);
+  if(threshold>0&&reward>0)cards.push({kind:'tier',thresholdUsdt:threshold,rewardUsdt:reward,earned:!!tier.earned,skipped:!!tier.skipped});
+ }
+ return cards;
+}
+function rewardNewsItems(){
+ const items=[],cards=permanentRewardCards();
+ for(const card of cards){
+  if(card.kind==='joining')items.push(`Welcome Bonus: ${num(card.amountUsdt)} USDT${card.credited?' - Credited':''}`);
+  else items.push(`Complete ${num(card.thresholdUsdt)} USDT - Earn ${num(card.rewardUsdt)} USDT`);
+ }
+ for(const task of visibleRewardTasks())items.push(`${num(task.rewardAmount)} USDT bonus - ${task.title||'Eligible reward'}`);
+ return items;
+}
+function nextPermanentReward(){
+ const p=state.permanent;if(!p||p.enabled===false)return null;
+ const best=Number(p.bestCompletedDepositUsdt||0);
+ return permanentRewardCards().filter(card=>card.kind==='tier'&&!card.earned&&!card.skipped&&card.thresholdUsdt>best).sort((a,b)=>a.thresholdUsdt-b.thresholdUsdt)[0]||null;
+}
 function rewardTickerMarkup(){
- const tasks=visibleRewardTasks();if(!tasks.length)return '';
- const message=tasks.map(t=>`${num(t.rewardAmount)} USDT bonus - ${t.title||'Eligible reward'}${t.description?` - ${t.description}`:''}`).join('   |   ');
+ const items=rewardNewsItems();if(!items.length)return '';
+ const message=items.join('   |   ');
  return `<div class="reward-ticker" aria-label="Live rewards"><span class="ticker-label">Rewards</span><div class="ticker-viewport"><div class="ticker-track"><span>${esc(message)}</span><span aria-hidden="true">${esc(message)}</span></div></div></div>`;
 }
+function permanentRewardsMarkup(){
+ const cards=permanentRewardCards();if(!cards.length)return '';
+ const best=Number(state.permanent?.bestCompletedDepositUsdt||0);
+ return `<section class="permanent-rewards-section"><div class="section-head campaign-title"><h3>Rewards for You</h3><button class="btn-text" data-action="permanent">View progress ${uiIcon('chevron')}</button></div><div class="permanent-reward-grid">${cards.map(card=>card.kind==='joining'?`<article class="permanent-reward-card joining"><span class="campaign-kicker">Welcome Bonus</span><strong>${num(card.amountUsdt)} USDT</strong><span class="reward-status">${card.credited?'Credited':'Available'}</span><small>${card.credited?'Added to your reward balance.':'Available in your reward program.'}</small></article>`:`<article class="permanent-reward-card"><span class="campaign-kicker">Deposit Milestone</span><strong>Earn ${num(card.rewardUsdt)} USDT</strong><b>Complete ${num(card.thresholdUsdt)} USDT</b><span class="reward-status">${card.earned?'Earned':card.skipped?'Passed':`${num(best)} / ${num(card.thresholdUsdt)} USDT`}</span><small>${card.earned?'Reward completed.':card.skipped?'This milestone was passed.':`Deposit ${num(Math.max(0,card.thresholdUsdt-best))} USDT more.`}</small></article>`).join('')}</div></section>`;
+}
+function nextBonusMarkup(){
+ const next=nextPermanentReward();if(!state.permanent||state.permanent.enabled===false)return '';
+ if(!next)return `<div class="card next-bonus-card complete"><div><span class="eyebrow">Next Bonus</span><strong>All bonuses completed</strong></div><span class="reward-status">Well done</span></div>`;
+ const best=Number(state.permanent.bestCompletedDepositUsdt||0);
+ return `<div class="card next-bonus-card"><div><span class="eyebrow">Next Bonus</span><strong>Complete ${num(next.thresholdUsdt)} USDT</strong><small>Earn ${num(next.rewardUsdt)} USDT</small></div><div class="next-bonus-progress"><b>${num(best)} / ${num(next.thresholdUsdt)} USDT</b><span><i style="width:${Math.min(100,best/next.thresholdUsdt*100)}%"></i></span></div></div>`;
+}
+function accountSnapshotMarkup(){
+ const activeOrders=active().length,banks=state.methods.filter(method=>String(method.type).toUpperCase()==='BANK').length,upis=state.methods.filter(method=>String(method.type).toUpperCase()==='UPI').length;
+ return `<div class="card account-snapshot"><span class="eyebrow">Account Snapshot</span><div class="snapshot-grid"><div><strong>${activeOrders}</strong><small>Active Orders</small></div><div><strong>${banks}</strong><small>Bank Accounts</small></div><div><strong>${upis}</strong><small>UPI IDs</small></div></div></div>`;
+}
+function wheelSectorPath(index,count,radius=164){
+ const angle=360/count,start=(-90+index*angle)*Math.PI/180,end=(-90+(index+1)*angle)*Math.PI/180;
+ const x1=180+radius*Math.cos(start),y1=180+radius*Math.sin(start),x2=180+radius*Math.cos(end),y2=180+radius*Math.sin(end);
+ return `M 180 180 L ${x1.toFixed(2)} ${y1.toFixed(2)} A ${radius} ${radius} 0 ${angle>180?1:0} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z`;
+}
+function wheelMarkup(){
+ const segments=(state.wheel?.segments||[]).filter(segment=>segment&&segment.id);
+ if(!segments.length)return `<section class="card wheel-card"><div class="section-head"><h3>Daily Spin</h3></div><div class="notice">The daily wheel is not available right now.</div></section>`;
+ const angle=360/segments.length,fontSize=Math.max(9,Math.min(14,112/segments.length)),winner=state._wheelResult?.segmentId;
+ const sectors=segments.map((segment,index)=>{const center=(-90+(index+.5)*angle)*Math.PI/180,x=180+104*Math.cos(center),y=180+104*Math.sin(center);return `<path d="${wheelSectorPath(index,segments.length)}" class="wheel-sector ${index%2?'alt':''} ${winner&&String(winner)===String(segment.id)?'winner':''}"/><text x="${x.toFixed(1)}" y="${y.toFixed(1)}" class="wheel-label" style="font-size:${fontSize}px">${esc(segment.label||`${num(segment.rewardAmount)} USDT`)}</text>`}).join('');
+ const result=state._wheelResult,previous=!result?state.wheel?.previousResult:null,canSpin=!!state.wheel?.canSpin&&!state._spinning;
+ const status=state._spinning?'Spinning':state.wheel?.canSpin?'One spin per day':state.wheel?.nextEligibleAt?'Next spin available tomorrow':'Used Today';
+ return `<section class="card wheel-card"><div class="section-head"><div><span class="eyebrow">Daily Bonus</span><h3>Spin & Win</h3></div><span class="wheel-status">${status}</span></div><div class="wheel-stage"><span class="wheel-pointer" aria-hidden="true"></span><div id="spinWheel" class="wheel-disc ${state._spinning?'is-pending':''}" style="transform:rotate(${Number(state._wheelAngle||0)}deg)"><svg viewBox="0 0 360 360" role="img" aria-label="Daily reward wheel">${sectors}<circle cx="180" cy="180" r="42" class="wheel-hub"/><text x="180" y="176" class="wheel-brand">eMoney</text><text x="180" y="194" class="wheel-brand-sub">REWARDS</text></svg><button id="spinBtn" class="wheel-spin-button" ${canSpin?'':'disabled'}>${state._spinning?'Spinning':state.wheel?.canSpin?'Spin':'Used'}</button></div></div>${result?`<div class="wheel-result"><strong>Congratulations!</strong><span>You won ${num(result.rewardAmount)} USDT</span><small>${esc(result.label||'Daily reward')}</small></div>`:previous?`<div class="wheel-previous"><b>Today's reward</b><span>${num(previous.rewardAmount)} USDT</span></div>`:''}</section>`;
+}
+
 function renderRewards(){
- const ref=state.referrals||{};
+ const ref=state.referrals||{},tasks=visibleRewardTasks(),permanent=permanentRewardCards();
  $('#page-rewards').innerHTML=`<div class="reward-intro">${art('rewardsHero','','eMoney Rewards. Make Life Better. Stylish adult brand ambassador holding a gift.')}<button class="art-hotspot art-bell" data-action="notifications" aria-label="Notifications"></button><button class="art-hotspot art-profile" data-action="account" aria-label="Your profile"></button><button class="art-hotspot art-brand" data-jump="overview" aria-label="eMoney home"></button></div>
  <div class="dark-card rewards-balance"><button class="reward-cash-link" data-action="reward-history"><span class="balance-title">${uiIcon('gift')}Your Rewards Balance</span><div class="reward-num">${num(state.rewards?.balance)} <small>USDT</small></div><div class="reward-caption">Keep earning. More rewards await!</div></button><div class="reward-art">${art('rewardGift','','Green gift and gold coins')}</div></div>
- <div class="card referral-summary"><span class="referral-bubble">${uiIcon('group')}</span><div><h3>Referral Earnings</h3><strong>${num(ref.rewardEarned)} <small>USDT</small></strong><p>${Number(ref.qualifiedCount||0)} qualified · ${Number(ref.invitedCount||0)} invited</p></div><button class="btn btn-secondary btn-sm" data-action="referrals">View Details</button>${art('referralArt','','More friends, bigger rewards')}</div>
- <div class="section-head campaign-title"><h3>Live reward campaigns</h3><button class="btn-text" data-action="campaigns">View All ${uiIcon('chevron')}</button></div><div class="campaign-grid live-campaign-grid">${visibleRewardTasks().map(t=>{const claim=t.claim,eligible=canClaimTask(t);return `<article class="promo-card ${eligible?'green':''}"><div class="campaign-kicker">${esc(t.campaignTitle||'Campaign')}</div><h4>${esc(t.title||'Reward task')}</h4><strong>${num(t.rewardAmount)} USDT</strong><small>${esc(t.description||'Complete the eligible task to earn this reward.')}</small><span class="reward-status">${claim?esc(claim.status==='credited'?'Claimed':claim.status):eligible?'Ready to claim':'In progress'}</span><button class="btn btn-secondary btn-sm" data-claim="${esc(t.id)}" data-campaign="${esc(t.campaignId)}" ${eligible?'':'disabled'}>${claim?esc(claim.status==='credited'?'Claimed':claim.status):eligible?(String(t.claimType).toUpperCase()==='MANUAL'?'Submit Claim':'Claim Reward'):'In Progress'}</button></article>`;}).join('')||empty('No live rewards are available right now.')}</div>
- <div class="dark-card wheel-banner">${art('wheel','','Daily reward wheel')}<div class="wheel-copy"><small>DAILY BONUS</small><h3>Spin & Win</h3><p>${state.wheel?.canSpin?'Your daily spin is ready.':'Check your next eligible spin.'}</p></div><button id="spinBtn" class="btn btn-gold" ${state.wheel?.canSpin?'':'disabled'}>${state.wheel?.canSpin?'Spin Now':'Used Today'} ${uiIcon('chevron')}</button></div>
+ <div class="card referral-summary"><span class="referral-bubble">${uiIcon('group')}</span><div><h3>Referral Earnings</h3><strong>${num(ref.rewardEarned)} <small>USDT</small></strong><p>${Number(ref.qualifiedCount||0)} qualified - ${Number(ref.invitedCount||0)} invited</p></div><button class="btn btn-secondary btn-sm" data-action="referrals">View Details</button>${art('referralArt','','More friends, bigger rewards')}</div>
+ ${permanentRewardsMarkup()}
+ ${tasks.length?`<div class="section-head campaign-title"><h3>Live reward campaigns</h3><button class="btn-text" data-action="campaigns">View All ${uiIcon('chevron')}</button></div><div class="campaign-grid live-campaign-grid">${tasks.map(t=>{const claim=t.claim,eligible=canClaimTask(t);return `<article class="promo-card ${eligible?'green':''}"><div class="campaign-kicker">${esc(t.campaignTitle||'Campaign')}</div><h4>${esc(t.title||'Reward task')}</h4><strong>${num(t.rewardAmount)} USDT</strong><small>${esc(t.description||'Complete the eligible task to earn this reward.')}</small><span class="reward-status">${claim?esc(claim.status==='credited'?'Claimed':claim.status):eligible?'Ready to claim':'In progress'}</span><button class="btn btn-secondary btn-sm" data-claim="${esc(t.id)}" data-campaign="${esc(t.campaignId)}" ${eligible?'':'disabled'}>${claim?esc(claim.status==='credited'?'Claimed':claim.status):eligible?(String(t.claimType).toUpperCase()==='MANUAL'?'Submit Claim':'Claim Reward'):'In Progress'}</button></article>`;}).join('')}</div>`:''}
+ ${!permanent.length&&!tasks.length?empty('No rewards are available right now.'):''}
+ ${wheelMarkup()}
  <div class="card invite-code-card"><span class="invite-icon">${ico('spark')}</span><div><h4>Your Referral Code</h4><div class="ref-code-line"><b>${esc(ref.referralCode||'Not assigned')}</b><button data-copy="${esc(ref.webUrl||ref.referralCode||'')}" aria-label="Copy referral link">${ico('copy')}</button></div></div><button class="btn btn-secondary" data-action="share-referral">${uiIcon('share')}Share Now</button></div>
- <div class="rewards-more"><button class="btn-text" data-action="reward-history">Reward History</button><button class="btn-text" data-action="about">${('About rewards')}</button></div>`;
- $('#spinBtn').onclick=spinWheel;$$('[data-claim]').forEach(b=>b.onclick=async()=>{b.disabled=true;await claimTask(b.dataset.claim,b.dataset.campaign);renderRewards()});bindJumps();bindActions();
+ <div class="rewards-more"><button class="btn-text" data-action="reward-history">Reward History</button><button class="btn-text" data-action="about">About rewards</button></div>`;
+ $('#spinBtn')?.addEventListener('click',spinWheel);$$('[data-claim]').forEach(b=>b.onclick=async()=>{b.disabled=true;await claimTask(b.dataset.claim,b.dataset.campaign);renderRewards()});bindJumps();bindActions();
 }
+
 function settingRow(icon,title,sub,action,value=''){return `<button class="setting-row" data-action="${action}"><span class="setting-icon">${uiIcon(icon)}</span><span class="setting-copy"><b>${title}</b><small>${sub}</small></span>${value?`<span class="value">${value}</span>`:''}${uiIcon('chevron')}</button>`}
 function renderProfile(){
  const p=state.profile||{},member=state.user?.createdAt||p.createdAt;
@@ -514,7 +589,7 @@ function rateDetails() {
 function showAbout() {
   modal('eMoney','Mobile application · version 1.1.3',`<div class="list"><div class="list-item"><b>Your account, in one place</b><small>Sell USDT, manage receiving accounts, follow orders and access eligible rewards.</small></div><div class="list-item"><b>Deposits and transfers</b><small>TRON verification, rates, quotes, order transitions and transfer decisions are handled by the existing server.</small></div><div class="notice">Never share your password, authenticator code, recovery codes or wallet private keys with another person.</div></div>`);
 }
-function handleAction(a){const actions={'payouts':openPayoutMethods,'edit-profile':openProfileEdit,'security':openSecurity,'sessions':openSessions,'support':openSupport,'notifications':openNotifications,'toggle-notifications':toggleNotifications,'logout':confirmLogout,'account':()=>{closeModal();go('profile');window.scrollTo(0,0)},'search':openSearch,'about':showAbout,'export':exportOrders,'reward-history':openRewardHistory,'referrals':openReferrals,'campaigns':showCampaigns,'share-referral':shareReferral,'notification-settings':notificationSettings,'language':languageSettings,'theme':themeSettings,'auth-help':authHelp,'forgot':forgotPassword,'rates':rateDetails};actions[a]?.()}
+function handleAction(a){const actions={'payouts':openPayoutMethods,'edit-profile':openProfileEdit,'security':openSecurity,'sessions':openSessions,'support':openSupport,'notifications':openNotifications,'toggle-notifications':toggleNotifications,'logout':confirmLogout,'account':()=>{closeModal();go('profile');window.scrollTo(0,0)},'search':openSearch,'about':showAbout,'export':exportOrders,'reward-history':openRewardHistory,'referrals':openReferrals,'campaigns':showCampaigns,'permanent':openPermanentRewards,'share-referral':shareReferral,'notification-settings':notificationSettings,'language':languageSettings,'theme':themeSettings,'auth-help':authHelp,'forgot':forgotPassword,'rates':rateDetails};actions[a]?.()}
 
 $('#loginTab').onclick=()=>switchAuth('login');$('#registerTab').onclick=()=>switchAuth('register');
 $('#passwordToggle').onclick=()=>{const p=$('#password'),visible=p.type==='password';p.type=visible?'text':'password';$('#passwordToggle').setAttribute('aria-label',visible?'Hide password':'Show password')};
