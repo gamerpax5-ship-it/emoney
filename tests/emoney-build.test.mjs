@@ -21,6 +21,14 @@ test('same-origin cookie API contract and production readiness guard retained',a
  assert.match(server,/const productionConfigurationReady =/);
  assert.match(server,/twoFactorEncryptionConfigured/);
  assert.match(server,/strict && !ready \? 503 : 200/);
+ const gradle=await readFile(join(root,'android/app/build.gradle.kts'),'utf8');
+ assert.match(gradle,/https:\/\/emoney-production-3e0a\.up\.railway\.app\//);
+ assert.match(gradle,/versionCode = 9/);
+ assert.match(gradle,/versionName = "1\.1\.1"/);
+ const apkRoute=server.slice(server.indexOf("if (isDigiRupeeHost && ['/download/digirupee.apk', '/download/emoney.apk'].includes(pathname))"),server.indexOf('const legacyAdminPath'));
+ const eMoneyCandidates=apkRoute.slice(apkRoute.indexOf('const candidates ='),apkRoute.indexOf('\n        : ['));
+ assert.match(eMoneyCandidates,/join\(root, '\.\.', 'dist', 'eMoney\.apk'\)/);
+ assert.doesNotMatch(eMoneyCandidates,/digiRupee\.apk/);
  const railway=JSON.parse(await readFile(join(root,'railway.json'),'utf8'));
  assert.equal(railway.deploy.healthcheckPath,'/ready');
  const migration=await readFile(join(root,'supabase/migrations/20260915000100_loktron_persistence.sql'),'utf8');
