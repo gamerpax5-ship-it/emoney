@@ -34,6 +34,17 @@ test('same-origin cookie API contract and production readiness guard retained',a
  const migration=await readFile(join(root,'supabase/migrations/20260915000100_loktron_persistence.sql'),'utf8');
  for(const statement of ['create table if not exists public.loktron_state','create table if not exists public.loktron_files','enable row level security','revoke all on table public.loktron_state from anon, authenticated','revoke all on table public.loktron_files from anon, authenticated','grant all on table public.loktron_state to service_role','grant all on table public.loktron_files to service_role']) assert.match(migration,new RegExp(statement.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i'));
 });
+test('deferred referral APK hook targets the stable route opening',async()=>{
+ const transform=await readFile(join(root,'scripts/enable-deferred-referrals.mjs'),'utf8');
+ assert.match(transform,/const downloadNeedle = "    if \(isDigiRupeeHost && \['\/download\/digirupee\.apk', '\/download\/emoney\.apk'\]\.includes\(pathname\)\) \{\\n";/);
+ assert.doesNotMatch(transform,/const downloadNeedle[\s\S]*const candidates = \[/);
+ assert.doesNotMatch(transform,/downloadPreludeForAlias/);
+ assert.match(transform,/source = source\.replace\(downloadNeedle, downloadNeedle \+ downloadPrelude\)/);
+ const server=await readFile(join(root,'website/server.mjs'),'utf8');
+ const route=server.slice(server.indexOf("if (isDigiRupeeHost && ['/download/digirupee.apk', '/download/emoney.apk'].includes(pathname))"),server.indexOf('const legacyAdminPath'));
+ assert.match(route,/const candidates = pathname\.endsWith\('\/emoney\.apk'\)/);
+ assert.match(route,/join\(root, '\.\.', 'dist', 'eMoney\.apk'\)/);
+});
 test('all approved artwork bytes have matching SHA-256',async()=>{
  const hashes=JSON.parse(await readFile(join(source,'asset-sha256.json'),'utf8'));assert.equal(Object.keys(hashes).length,14);
  for(const [file,sha] of Object.entries(hashes))assert.equal(hash(await readFile(join(source,file))),sha,file);
