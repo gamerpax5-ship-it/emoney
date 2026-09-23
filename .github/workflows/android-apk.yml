@@ -26,7 +26,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      DIGIRUPEE_WEB_APP_URL: https://digirupee.loktron.com/
+      DIGIRUPEE_WEB_APP_URL: https://emoney-production-3e0a.up.railway.app/
       ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
       HAS_ANDROID_SIGNING: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' && secrets.ANDROID_STORE_PASSWORD != '' }}
@@ -97,10 +97,10 @@ jobs:
       - name: Prepare named APK files
         run: |
           mkdir -p dist
-          cp android/app/build/outputs/apk/debug/app-debug.apk dist/digiRupee-debug.apk
-          cp android/app/build/outputs/apk/release/app-release-unsigned.apk dist/digiRupee-release-unsigned.apk
-          test -s dist/digiRupee-debug.apk
-          test -s dist/digiRupee-release-unsigned.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk dist/eMoney-debug.apk
+          cp android/app/build/outputs/apk/release/app-release-unsigned.apk dist/eMoney-release-unsigned.apk
+          test -s dist/eMoney-debug.apk
+          test -s dist/eMoney-release-unsigned.apk
 
       - name: Sign release APK when signing secrets are configured
         if: ${{ env.HAS_ANDROID_SIGNING == 'true' }}
@@ -111,25 +111,27 @@ jobs:
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
         run: |
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > release.keystore
-          cp dist/digiRupee-release-unsigned.apk dist/digiRupee-release-signed.apk
+          cp dist/eMoney-release-unsigned.apk dist/eMoney-release-signed.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
             --ks release.keystore \
             --ks-key-alias "$ANDROID_KEY_ALIAS" \
             --ks-pass "pass:$ANDROID_STORE_PASSWORD" \
             --key-pass "pass:$ANDROID_KEY_PASSWORD" \
-            dist/digiRupee-release-signed.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify dist/digiRupee-release-signed.apk
+            dist/eMoney-release-signed.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify dist/eMoney-release-signed.apk
 
-      - name: Prepare installable digiRupee APK
+      - name: Prepare installable eMoney APK
         run: |
-          if test -s dist/digiRupee-release-signed.apk; then
-            cp dist/digiRupee-release-signed.apk dist/digiRupee.apk
+          if test -s dist/eMoney-release-signed.apk; then
+            cp dist/eMoney-release-signed.apk dist/eMoney.apk
             echo "APK_PUBLICATION_MODE=signed-release" >> "$GITHUB_ENV"
           else
-            cp dist/digiRupee-debug.apk dist/digiRupee.apk
+            cp dist/eMoney-debug.apk dist/eMoney.apk
             echo "APK_PUBLICATION_MODE=debug-fallback" >> "$GITHUB_ENV"
           fi
-          test -s dist/digiRupee.apk
+          cp dist/eMoney.apk dist/digiRupee.apk
+          cp dist/eMoney-debug.apk dist/digiRupee-debug.apk
+          test -s dist/eMoney.apk
 
       - name: Report APK signing mode
         run: |
@@ -138,11 +140,6 @@ jobs:
           else
             echo "Android APK signing: protected signing secrets are absent; debug fallback is available for testing only." >> "$GITHUB_STEP_SUMMARY"
           fi
-
-      - name: Add eMoney display filenames
-        run: |
-          cp dist/digiRupee.apk dist/eMoney.apk
-          cp dist/digiRupee-debug.apk dist/eMoney-debug.apk
 
       - name: Upload eMoney APK artifacts
         uses: actions/upload-artifact@v4
@@ -164,7 +161,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add dist/digiRupee.apk dist/digiRupee-debug.apk dist/digiRupee-release-unsigned.apk
+          git add dist/eMoney.apk dist/eMoney-debug.apk dist/eMoney-release-unsigned.apk dist/digiRupee.apk dist/digiRupee-debug.apk
           if git diff --cached --quiet; then
             echo "APK files unchanged"
           else

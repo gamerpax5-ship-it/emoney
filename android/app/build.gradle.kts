@@ -8,7 +8,7 @@ android {
 
     val webAppUrlProvider = providers.gradleProperty("webAppUrl")
         .orElse(providers.environmentVariable("DIGIRUPEE_WEB_APP_URL"))
-        .orElse("https://digirupee.loktron.com/")
+        .orElse("https://emoney-production-3e0a.up.railway.app/")
 
     fun quoted(value: String): String {
         return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
@@ -18,8 +18,8 @@ android {
         applicationId = "com.loktron.tronpay"
         minSdk = 24
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.1.0"
+        versionCode = 9
+        versionName = "1.1.1"
         buildConfigField("String", "WEB_APP_URL", quoted(webAppUrlProvider.get()))
     }
 

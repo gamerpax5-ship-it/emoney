@@ -4658,10 +4658,17 @@ const server = http.createServer(async (req, res) => {
     let hostRelativePath = '';
 
     if (isDigiRupeeHost && ['/download/digirupee.apk', '/download/emoney.apk'].includes(pathname)) {
-      const candidates = [
-        join(root, '..', 'dist', 'digiRupee.apk'),
-        join(root, '..', 'dist', 'digiRupee-debug.apk')
-      ];
+      const candidates = pathname.endsWith('/emoney.apk')
+        ? [
+            join(root, '..', 'dist', 'eMoney.apk'),
+            join(root, '..', 'dist', 'eMoney-debug.apk')
+          ]
+        : [
+            join(root, '..', 'dist', 'digiRupee.apk'),
+            join(root, '..', 'dist', 'eMoney.apk'),
+            join(root, '..', 'dist', 'digiRupee-debug.apk'),
+            join(root, '..', 'dist', 'eMoney-debug.apk')
+          ];
       for (const candidate of candidates) {
         try {
           const apk = await readFile(candidate);
