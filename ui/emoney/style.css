@@ -79,6 +79,12 @@ button:focus-visible,a:focus-visible{outline:2px solid #187455;outline-offset:3p
  .rates-card .rate-card-icon{width:27px;height:27px}
  .live-campaign-grid{gap:7px}
  .live-campaign-grid .promo-card{min-height:158px;padding:8px}
- .live-campaign-grid .promo-card small{font-size:8px}
+ .live-campaign-grid .promo-card small{font-size:11px}
 }
 @media(prefers-reduced-motion:reduce){.ticker-track{animation:none!important;transform:none!important}}
+@media(max-width:360px){
+ .live-campaign-grid{grid-template-columns:1fr}
+ .live-campaign-grid .promo-card{min-height:150px}
+ .setting-row{gap:8px}
+ .setting-copy{min-width:0}
+}
