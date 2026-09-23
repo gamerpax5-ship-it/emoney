@@ -16,6 +16,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
 import android.view.WindowInsets;
+import android.view.Gravity;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
@@ -26,6 +27,10 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
 
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 1001;
@@ -34,6 +39,7 @@ public class MainActivity extends Activity {
     private static final String REFERRAL_MARKER = "DIGIRUPEE_REF:";
     private static final String LOCAL_OFFLINE_URL = "file:///android_asset/offline.html";
     private WebView webView;
+    private View loadingOverlay;
     private ValueCallback<Uri[]> fileCallback;
     private boolean showingOfflinePage = false;
     private String appUrl;
@@ -60,6 +66,8 @@ public class MainActivity extends Activity {
         webView.setVerticalScrollBarEnabled(false);
         webView.setHorizontalScrollBarEnabled(false);
         rootView.addView(webView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        loadingOverlay = createLoadingOverlay();
+        rootView.addView(loadingOverlay, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         setContentView(rootView);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -108,6 +116,7 @@ public class MainActivity extends Activity {
                 super.onPageFinished(view, url);
                 if (isAppOrigin(Uri.parse(url))) {
                     showingOfflinePage = false;
+                    hideLoadingScreen();
                     CookieManager.getInstance().flush();
                     requestNotificationPermission();
                 }
@@ -261,6 +270,7 @@ public class MainActivity extends Activity {
 
     private void loadWebApp() {
         try {
+            showLoadingScreen();
             appUrl = configuredAppUrl();
             appOrigin = Uri.parse(appUrl);
             showingOfflinePage = false;
@@ -274,6 +284,7 @@ public class MainActivity extends Activity {
     }
 
     private void showOfflinePage() {
+        hideLoadingScreen();
         if (showingOfflinePage) return;
         showingOfflinePage = true;
         String retryUrl = appUrl == null ? "" : appUrl.replace("\\", "%5C").replace("'", "%27");
@@ -285,6 +296,52 @@ public class MainActivity extends Activity {
                 + "<button onclick=\"location.href='" + retryUrl + "'\">Retry</button></div></body></html>";
         webView.loadDataWithBaseURL(LOCAL_OFFLINE_URL, html, "text/html", "UTF-8", null);
     }
+
+    private boolean isNightMode() {
+        return (getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    private View createLoadingOverlay() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setGravity(Gravity.CENTER);
+        panel.setPadding(28, 28, 28, 28);
+        panel.setBackgroundColor(isNightMode() ? Color.rgb(13, 26, 21) : Color.rgb(252, 251, 247));
+
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.mipmap.ic_emoney);
+        logo.setContentDescription("eMoney");
+        logo.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        panel.addView(logo, new LinearLayout.LayoutParams(92, 92));
+
+        TextView title = new TextView(this);
+        title.setText("eMoney");
+        title.setTextSize(28);
+        title.setGravity(Gravity.CENTER);
+        title.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        title.setTextColor(isNightMode() ? Color.rgb(238, 248, 240) : Color.rgb(16, 43, 34));
+        panel.addView(title, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        TextView subtitle = new TextView(this);
+        subtitle.setText("Loading your secure account…");
+        subtitle.setTextSize(14);
+        subtitle.setGravity(Gravity.CENTER);
+        subtitle.setTextColor(isNightMode() ? Color.rgb(173, 197, 182) : Color.rgb(89, 107, 99));
+        LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        subtitleParams.topMargin = 8;
+        panel.addView(subtitle, subtitleParams);
+
+        ProgressBar progress = new ProgressBar(this);
+        progress.setIndeterminate(true);
+        LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(42, 42);
+        progressParams.gravity = Gravity.CENTER_HORIZONTAL;
+        progressParams.topMargin = 22;
+        panel.addView(progress, progressParams);
+        return panel;
+    }
+
+    private void showLoadingScreen() { if (loadingOverlay != null) loadingOverlay.setVisibility(View.VISIBLE); }
+    private void hideLoadingScreen() { if (loadingOverlay != null) loadingOverlay.setVisibility(View.GONE); }
 
     private void fallbackBack() {
         if (webView != null && webView.canGoBack()) webView.goBack();
