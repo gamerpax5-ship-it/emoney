@@ -23,8 +23,8 @@ test('same-origin cookie API contract and production readiness guard retained',a
  assert.match(server,/strict && !ready \? 503 : 200/);
  const gradle=await readFile(join(root,'android/app/build.gradle.kts'),'utf8');
  assert.match(gradle,/https:\/\/emoney-production-3e0a\.up\.railway\.app\//);
- assert.match(gradle,/versionCode = 9/);
- assert.match(gradle,/versionName = "1\.1\.1"/);
+ assert.match(gradle,/versionCode = 10/);
+ assert.match(gradle,/versionName = "1\.1\.2"/);
  const apkRoute=server.slice(server.indexOf("if (isDigiRupeeHost && ['/download/digirupee.apk', '/download/emoney.apk'].includes(pathname))"),server.indexOf('const legacyAdminPath'));
  const eMoneyCandidates=apkRoute.slice(apkRoute.indexOf('const candidates ='),apkRoute.indexOf('\n        : ['));
  assert.match(eMoneyCandidates,/join\(root, '\.\.', 'dist', 'eMoney\.apk'\)/);
@@ -33,6 +33,37 @@ test('same-origin cookie API contract and production readiness guard retained',a
  assert.equal(railway.deploy.healthcheckPath,'/ready');
  const migration=await readFile(join(root,'supabase/migrations/20260915000100_loktron_persistence.sql'),'utf8');
  for(const statement of ['create table if not exists public.loktron_state','create table if not exists public.loktron_files','enable row level security','revoke all on table public.loktron_state from anon, authenticated','revoke all on table public.loktron_files from anon, authenticated','grant all on table public.loktron_state to service_role','grant all on table public.loktron_files to service_role']) assert.match(migration,new RegExp(statement.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i'));
+});
+test('mobile UI stays backend-driven and exposes the approved flows',()=>{
+ assert.match(app,/state\.rates\?\.rates\?\.upi/);
+ assert.match(app,/state\.rates\?\.rates\?\.bank/);
+ assert.match(app,/upiMinUsdt/); assert.match(app,/bankMinUsdt/);
+ assert.match(app,/Minimum deposit/);
+ assert.match(app,/Add UPI/); assert.match(app,/Add Bank Account/);
+ assert.match(app,/emoney-theme/); assert.match(app,/data-theme-choice/);
+ assert.match(app,/state\.campaigns\.flatMap/); assert.match(app,/data-claim/);
+ assert.match(app,/distributedPaise===expectedPaise/); assert.match(app,/type==='BANK'&&m\.enabled/);
+ assert.match(app,/data-alloc/); assert.match(app,/bank-allocations/);
+ assert.ok(app.includes('class="nav-icon"'));
+});
+test('bank distribution waits for deposit detection and uses integer paise totals',async()=>{
+ const server=await readFile(join(root,'website/server.mjs'),'utf8');
+ const uiStatuses="new Set(['Detected','Confirming','USDT Confirmed','INR Processing','Late Review'])";
+ assert.match(app,/o\.payoutType==='BANK'&&o\.flexibleBankAllocation&&bankDistributionStatuses\.has\(o\.status\)/);
+ assert.match(app,/if\(!bankDistributionStatuses\.has\(o\?\.status\)\)/);
+ assert.match(app,/const toPaise=value=>Math\.round\(Number\(value\|\|0\)\*100\)/);
+ assert.match(app,/distributedPaise===expectedPaise/);
+ assert.match(server,/const digiBankDistributionStatuses = new Set\(\['Detected', 'Confirming', 'USDT Confirmed', 'INR Processing', 'Late Review'\]\)/);
+ assert.match(server,/if \(!digiBankDistributionStatuses\.has\(order\.status\)\) return send\(res, 409, \{ error: 'Bank distribution is available after the deposit is detected' \}\)/);
+ assert.match(server,/if \(plannedTotal !== Number\(order\.inrPaise\)\) return send\(res, 400, \{ error: 'Bank allocation total must equal the order INR total' \}\)/);
+ assert.match(server,/order\.allocations = next;[\s\S]*return send\(res, 200, \{ order: publicDigiOrder\(order\) \}\)/);
+ assert.ok(uiStatuses.includes('Detected'));
+});
+test('Android startup and release metadata retain eMoney identity',async()=>{
+ const activity=await readFile(join(root,'android/app/src/main/java/com/loktron/tronpay/MainActivity.java'),'utf8');
+ assert.match(activity,/createLoadingOverlay/); assert.match(activity,/Loading your secure account/); assert.match(activity,/R\.mipmap\.ic_emoney/);
+ const gradle=await readFile(join(root,'android/app/build.gradle.kts'),'utf8');
+ assert.match(gradle,/applicationId = "com\.loktron\.tronpay"/); assert.match(gradle,/versionCode = 10/); assert.match(gradle,/versionName = "1\.1\.2"/); assert.ok(gradle.includes('https://emoney-production-3e0a.up.railway.app/'));
 });
 test('deferred referral APK hook targets the stable route opening',async()=>{
  const transform=await readFile(join(root,'scripts/enable-deferred-referrals.mjs'),'utf8');

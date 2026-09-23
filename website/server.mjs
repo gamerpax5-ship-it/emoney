@@ -751,6 +751,7 @@ function publicDigiConfig() {
 
 const digiFinalStatuses = new Set(['Completed', 'Expired', 'Failed', 'Rejected']);
 const digiActiveStatuses = new Set(['Awaiting Deposit', 'Detected', 'Confirming', 'USDT Confirmed', 'INR Processing', 'Late Review']);
+const digiBankDistributionStatuses = new Set(['Detected', 'Confirming', 'USDT Confirmed', 'INR Processing', 'Late Review']);
 const digiAddressCooldownMs = tronAddressReuseCooldownMs;
 
 function digiOrderIsActive(order) {
@@ -3805,6 +3806,7 @@ async function digirupeeApi(req, res, path) {
     if (!order) return send(res, 404, { error: 'Order not found' });
     if (order.payoutType !== 'BANK' || !order.flexibleBankAllocation) return send(res, 409, { error: 'This order does not support flexible bank distribution' });
     if (digiFinalStatuses.has(order.status)) return send(res, 409, { error: 'Bank distribution cannot be changed on a final order' });
+    if (!digiBankDistributionStatuses.has(order.status)) return send(res, 409, { error: 'Bank distribution is available after the deposit is detected' });
 
     const b = await body(req);
     if (!Array.isArray(b.allocations)) return send(res, 400, { error: 'allocations must be an array' });
@@ -3820,6 +3822,7 @@ async function digirupeeApi(req, res, path) {
 
     const plannedTotal = next.reduce((sum, item) => sum + item.inrPaise, 0);
     if (plannedTotal > Number(order.inrPaise)) return send(res, 400, { error: 'Allocated INR cannot exceed the order INR total' });
+    if (plannedTotal !== Number(order.inrPaise)) return send(res, 400, { error: 'Bank allocation total must equal the order INR total' });
 
     const paidByMethod = new Map();
     for (const ref of order.payout?.allocations || []) {
