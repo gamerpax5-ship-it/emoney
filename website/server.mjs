@@ -30,6 +30,10 @@ const configuredOrigins = [...new Set([
   .map(v => v.trim().replace(/\/$/, ''))
   .filter(Boolean)
 ])];
+const emoneyPublicOrigin = 'https://emoney-production-3e0a.up.railway.app';
+function digiReferralOrigin() {
+  return emoneyPublicOrigin;
+}
 const supabaseUrl = String(process.env.SUPABASE_URL || process.env.LOKTRON_SUPABASE_URL || '').replace(/\/$/, '');
 const supabaseSecretKey = String(process.env.SUPABASE_SECRET_KEY || process.env.LOKTRON_SUPABASE_KEY || '');
 const persistenceSecret = String(process.env.LOKTRON_PERSISTENCE_SECRET || '');
@@ -150,7 +154,7 @@ const defaultData = {
       quoteValiditySeconds: 600,
       channels: { upi: true, bank: true },
       updatedAt: Date.now(),
-      referrals: { enabled: true, inviterRewardUsdt: 10, referredRewardUsdt: 0, minimumCompletedUsdt: 0 },
+      referrals: { enabled: true, inviterCommissionPercent: 0.5, inviterRewardUsdt: 10, referredRewardUsdt: 0, minimumCompletedUsdt: 0 },
       rewardPage: {
         showMascot: true,
         showCoins: true,
@@ -175,6 +179,7 @@ const defaultData = {
     wheelConfig: { enabled: false, dailyClaimLimit: 1, segments: [], updatedAt: Date.now() },
     wheelClaims: [],
     referrals: [],
+    pendingReferralInstalls: [],
     supportTickets: [],
     notifications: [],
     authChallenges: [],
@@ -285,6 +290,7 @@ async function loadDb() {
         },
         wheelClaims: Array.isArray((parsed.digirupee || {}).wheelClaims) ? (parsed.digirupee || {}).wheelClaims : [],
         referrals: Array.isArray((parsed.digirupee || {}).referrals) ? (parsed.digirupee || {}).referrals : [],
+        pendingReferralInstalls: Array.isArray((parsed.digirupee || {}).pendingReferralInstalls) ? (parsed.digirupee || {}).pendingReferralInstalls : [],
         supportTickets: Array.isArray((parsed.digirupee || {}).supportTickets) ? (parsed.digirupee || {}).supportTickets : [],
         notifications: Array.isArray((parsed.digirupee || {}).notifications) ? (parsed.digirupee || {}).notifications : [],
         authChallenges: Array.isArray((parsed.digirupee || {}).authChallenges) ? (parsed.digirupee || {}).authChallenges : [],
@@ -538,6 +544,26 @@ function digiSessionIpHash(req) {
   return createHash('sha256').update(`${sessionSecret}|${raw}`).digest('hex').slice(0, 24);
 }
 
+const digiReferralCodePattern = /^DGR[A-F0-9]{10}$/;
+function normalizeDigiReferralCode(value) {
+  const code = String(value || '').trim().toUpperCase();
+  return digiReferralCodePattern.test(code) ? code : '';
+}
+
+async function recordDigiPendingReferralInstall(req, value) {
+  const referralCode = normalizeDigiReferralCode(value);
+  if (!referralCode) return false;
+  const referrer = db.digirupee.users.find(item => String(item.referralCode || '').toUpperCase() === referralCode);
+  if (!referrer) return false;
+  const now = Date.now();
+  const key = digiSessionIpHash(req);
+  db.digirupee.pendingReferralInstalls = (Array.isArray(db.digirupee.pendingReferralInstalls) ? db.digirupee.pendingReferralInstalls : [])
+    .filter(item => Number(item.expiresAt || 0) > now && item.key !== key && !item.claimedAt);
+  db.digirupee.pendingReferralInstalls.push({ key, referralCode: referrer.referralCode, createdAt: now, expiresAt: now + 6 * 60 * 60 * 1000, claimedAt: null });
+  await persist();
+  return true;
+}
+
 function digiDeviceLabel(userAgent) {
   const ua = String(userAgent || '');
   if (/android/i.test(ua) && /wv|webview/i.test(ua)) return 'Android WebView';
@@ -612,7 +638,7 @@ function normalizeDigiMobile(value) {
 
 const digiTicketCategories = new Set(['ORDER', 'DEPOSIT', 'PAYOUT', 'ACCOUNT', 'OTHER']);
 const digiTicketStatuses = new Set(['Open', 'In Progress', 'Resolved', 'Closed']);
-const digiCriticalNotificationTypes = new Set(['order', 'deposit', 'payout', 'support', 'security']);
+const digiCriticalNotificationTypes = new Set(['order', 'deposit', 'payout', 'support', 'security', 'referral']);
 
 function createDigiNotification({ userId, type, title, message, entityType = null, entityId = null, sourceKey = null }) {
   const user = db.digirupee.users.find(item => item.id === userId);
@@ -1913,6 +1939,7 @@ function recordFlexibleDigiBankPayout(order, admin, raw) {
     appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'payout.completed', entityType: 'sell-order', entityId: order.id, details: { amount: formatInrPaise(payout.totalInrPaise), references: additions.map(item => item.reference) } });
     createDigiNotification({ userId: order.userId, type: 'payout', title: 'INR payout completed', message: `INR payout for ${order.id} has been recorded.`, entityType: 'sell-order', entityId: order.id, sourceKey: `payout:${order.id}:completed` });
     processDigiReferralQualification(order);
+    processDigiReferralTradeCommission(order);
   } else {
     setDigiOrderStatus(order, 'INR Processing', 'INR Processing', Date.now());
     createDigiNotification({ userId: order.userId, type: 'payout', title: 'Partial INR payout recorded', message: `${formatInrPaise(payout.paidInrPaise)} of ${formatInrPaise(payout.totalInrPaise)} has been recorded for ${order.id}.`, entityType: 'sell-order', entityId: order.id, sourceKey: `payout:${order.id}:partial:${payout.paidInrPaise}` });
@@ -1986,6 +2013,7 @@ function recordDigiPayout(order, admin, raw) {
     appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'payout.completed', entityType: 'sell-order', entityId: order.id, details: { amount: formatInrPaise(payout.totalInrPaise), references: additions.map(item => item.reference) } });
     createDigiNotification({ userId: order.userId, type: 'payout', title: 'INR payout completed', message: `INR payout for ${order.id} has been recorded.`, entityType: 'sell-order', entityId: order.id, sourceKey: `payout:${order.id}:completed` });
     processDigiReferralQualification(order);
+    processDigiReferralTradeCommission(order);
   }
   return { ok: true, idempotent: false };
 }
@@ -2784,20 +2812,66 @@ function campaignClaimCount(campaignId) {
 
 function referralPolicy() {
   const policy = db.digirupee.config.referrals || {};
-  return { enabled: policy.enabled !== false, inviterRewardUsdt: Number(policy.inviterRewardUsdt || 0), referredRewardUsdt: Number(policy.referredRewardUsdt || 0), minimumCompletedUsdt: Number(policy.minimumCompletedUsdt || 0) };
+  const inviterCommissionPercent = validDigiAmount(policy.inviterCommissionPercent ?? 0.5, 0, 100) ?? 0;
+  return {
+    enabled: policy.enabled !== false,
+    inviterCommissionPercent,
+    inviterRewardUsdt: Number(policy.inviterRewardUsdt || 0),
+    referredRewardUsdt: Number(policy.referredRewardUsdt || 0),
+    minimumCompletedUsdt: Number(policy.minimumCompletedUsdt || 0)
+  };
 }
 
-function referralPublic(referral) {
+function referralCommissionEntry(order, referrerUserId) {
+  return db.digirupee.rewardLedger.find(entry => entry.userId === referrerUserId && entry.sourceType === 'referral_commission' && entry.sourceId === order.id && entry.status === 'posted') || null;
+}
+
+function completedDigiOrderAt(order) {
+  const timeline = Array.isArray(order.timeline) ? order.timeline.find(item => item.status === 'Completed') : null;
+  return Number(order.payout?.completedAt || timeline?.at || order.updatedAt || order.createdAt || 0) || null;
+}
+
+function referralTradeSummary(order, referrerUserId) {
+  const commission = referralCommissionEntry(order, referrerUserId);
+  return {
+    orderId: order.id,
+    createdAt: order.createdAt,
+    completedAt: order.status === 'Completed' ? completedDigiOrderAt(order) : null,
+    status: order.status,
+    payoutType: order.payoutType,
+    usdtAmount: formatUsdtMicros(order.usdtMicros),
+    inrAmount: formatInrPaise(order.inrPaise),
+    commissionUsdt: formatUsdtMicros(commission?.amountMicros || 0)
+  };
+}
+
+function referralStats(referral) {
+  const completed = db.digirupee.orders.filter(order => order.userId === referral.referredUserId && order.status === 'Completed');
+  const commissionEntries = completed.map(order => referralCommissionEntry(order, referral.referrerUserId)).filter(Boolean);
+  return {
+    completedTradeCount: completed.length,
+    completedVolumeUsdt: formatUsdtMicros(completed.reduce((sum, order) => sum + Number(order.usdtMicros || 0), 0)),
+    commissionEarnedUsdt: formatUsdtMicros(commissionEntries.reduce((sum, entry) => sum + Number(entry.amountMicros || 0), 0)),
+    lastCompletedTradeAt: completed.length ? Math.max(...completed.map(completedDigiOrderAt)) : null
+  };
+}
+
+function referralPublic(referral, { includeInviter = false } = {}) {
   const inviter = db.digirupee.users.find(user => user.id === referral.referrerUserId);
   const referred = db.digirupee.users.find(user => user.id === referral.referredUserId);
-  return {
+  const result = {
     id: referral.id,
-    inviter: inviter ? { id: inviter.id, name: inviter.profile?.fullName || '', email: inviter.email } : { id: referral.referrerUserId },
-    referred: referred ? { id: referred.id, name: referred.profile?.fullName || '' } : { id: referral.referredUserId },
-    createdAt: referral.createdAt, status: referral.status, qualifiedAt: referral.qualifiedAt || null, qualifyingOrderId: referral.qualifyingOrderId || null,
+    status: referral.status,
+    createdAt: referral.createdAt,
+    qualifiedAt: referral.qualifiedAt || null,
+    referred: referred ? { id: referred.id, name: referred.profile?.fullName || '' } : { id: referral.referredUserId, name: '' },
+    stats: referralStats(referral),
     inviterReward: referral.inviterRewardLedgerId ? formatUsdtMicros(db.digirupee.rewardLedger.find(item => item.id === referral.inviterRewardLedgerId)?.amountMicros || 0) : '0',
-    referredReward: referral.referredRewardLedgerId ? formatUsdtMicros(db.digirupee.rewardLedger.find(item => item.id === referral.referredRewardLedgerId)?.amountMicros || 0) : '0'
+    referredReward: referral.referredRewardLedgerId ? formatUsdtMicros(db.digirupee.rewardLedger.find(item => item.id === referral.referredRewardLedgerId)?.amountMicros || 0) : '0',
+    qualifyingOrderId: referral.qualifyingOrderId || null
   };
+  if (includeInviter) result.inviter = inviter ? { id: inviter.id, name: inviter.profile?.fullName || '', email: inviter.email } : { id: referral.referrerUserId, name: '' };
+  return result;
 }
 
 function processDigiReferralQualification(order) {
@@ -2827,7 +2901,52 @@ function processDigiReferralQualification(order) {
   return true;
 }
 
+function processDigiReferralTradeCommission(order) {
+  if (!order || order.status !== 'Completed') return false;
+  const policy = referralPolicy();
+  if (!policy.enabled) return false;
+  const referral = db.digirupee.referrals.find(item => item.referredUserId === order.userId);
+  if (!referral) return false;
+  const commissionBps = Math.round(Number(policy.inviterCommissionPercent) * 100);
+  const basisMicros = Number(order.usdtMicros || 0);
+  if (!Number.isSafeInteger(basisMicros) || basisMicros <= 0 || !Number.isInteger(commissionBps) || commissionBps <= 0) return false;
+  const commissionMicrosBig = (BigInt(basisMicros) * BigInt(commissionBps)) / 10000n;
+  if (commissionMicrosBig <= 0n || commissionMicrosBig > BigInt(Number.MAX_SAFE_INTEGER)) return false;
+  const inviter = db.digirupee.users.find(user => user.id === referral.referrerUserId);
+  if (!inviter) return false;
+  const result = issueDigiReward({
+    userId: inviter.id,
+    amountMicros: Number(commissionMicrosBig),
+    type: 'referral_commission',
+    sourceType: 'referral_commission',
+    sourceId: order.id,
+    description: 'Referral commission from completed trade'
+  });
+  if (result.entry && !result.idempotent) {
+    referral.commissionLedgerIds = Array.isArray(referral.commissionLedgerIds) ? referral.commissionLedgerIds : [];
+    if (!referral.commissionLedgerIds.includes(result.entry.id)) referral.commissionLedgerIds.push(result.entry.id);
+    createDigiNotification({ userId: inviter.id, type: 'referral', title: 'Referral commission earned', message: `You earned ${formatUsdtMicros(result.entry.amountMicros)} USDT from a completed trade by a referred user.`, entityType: 'referral', entityId: referral.id, sourceKey: `referral-commission:${order.id}` });
+    appendDigiAudit({ actorType: 'system', actorId: 'digirupee', action: 'referral.commission_credited', entityType: 'sell-order', entityId: order.id, details: { referralId: referral.id, referrerUserId: inviter.id, commissionUsdt: formatUsdtMicros(result.entry.amountMicros), commissionBps } });
+  }
+  return !!result.entry;
+}
+
 async function digirupeeApi(req, res, path) {
+  if (req.method === 'GET' && path === '/referral-install/claim') {
+    const now = Date.now();
+    const key = digiSessionIpHash(req);
+    db.digirupee.pendingReferralInstalls = (Array.isArray(db.digirupee.pendingReferralInstalls) ? db.digirupee.pendingReferralInstalls : [])
+      .filter(item => Number(item.expiresAt || 0) > now && !item.claimedAt);
+    const pending = db.digirupee.pendingReferralInstalls
+      .filter(item => item.key === key)
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))[0] || null;
+    if (pending) {
+      pending.claimedAt = now;
+      await persist();
+    }
+    return send(res, 200, { referralCode: pending?.referralCode || null, expiresAt: pending?.expiresAt || null });
+  }
+
   if (req.method === 'GET' && path === '/admin/overview') {
     const admin = adminAuth(req);
     const expired = expireDigiOrders();
@@ -3029,12 +3148,48 @@ async function digirupeeApi(req, res, path) {
     return send(res, 201, { result: { segmentId: segment.id, label: segment.label, rewardAmount: formatUsdtMicros(segment.rewardAmountMicros), createdAt: now } });
   }
 
+  if (req.method === 'GET' && /^\/referrals\/[A-Za-z0-9_-]+\/trades$/.test(path)) {
+    const { user } = digirupeeAuth(req);
+    const referralId = path.split('/')[2];
+    const referral = db.digirupee.referrals.find(item => item.id === referralId && item.referrerUserId === user.id);
+    if (!referral) return send(res, 404, { error: 'Referral not found' });
+    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    const requestedLimit = Number(url.searchParams.get('limit') || 50);
+    const limit = Number.isInteger(requestedLimit) ? Math.max(1, Math.min(100, requestedLimit)) : 50;
+    const trades = db.digirupee.orders
+      .filter(order => order.userId === referral.referredUserId)
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+      .slice(0, limit)
+      .map(order => referralTradeSummary(order, user.id));
+    return send(res, 200, { referralId, trades, limit });
+  }
+
   if (req.method === 'GET' && path === '/referrals') {
     const { user } = digirupeeAuth(req);
     const own = db.digirupee.referrals.filter(referral => referral.referrerUserId === user.id);
-    const origin = configuredOrigins[0] || `${String(req.headers['x-forwarded-proto'] || 'http').split(',')[0]}://${req.headers.host || ''}`;
     const code = user.referralCode || null;
-    return send(res, 200, { referralCode: code, shareText: code ? `Join digiRupee with referral code ${code}` : null, webUrl: code && origin ? `${origin}/?ref=${encodeURIComponent(code)}` : null, invitedCount: own.length, qualifiedCount: own.filter(item => ['qualified', 'rewarded'].includes(item.status)).length, rewardEarned: formatUsdtMicros(own.reduce((sum, referral) => sum + Number(db.digirupee.rewardLedger.find(entry => entry.id === referral.inviterRewardLedgerId)?.amountMicros || 0), 0)), referrals: own.map(referralPublic) });
+    const webUrl = code ? `${digiReferralOrigin()}/?ref=${encodeURIComponent(code)}` : null;
+    const stats = own.reduce((summary, referral) => {
+      const current = referralStats(referral);
+      summary.completedTradeCount += current.completedTradeCount;
+      summary.completedVolumeUsdtMicros += Number(parseUsdtMicros(current.completedVolumeUsdt) || 0);
+      summary.commissionEarnedUsdtMicros += Number(parseUsdtMicros(current.commissionEarnedUsdt) || 0);
+      return summary;
+    }, { completedTradeCount: 0, completedVolumeUsdtMicros: 0, commissionEarnedUsdtMicros: 0 });
+    return send(res, 200, {
+      referralCode: code,
+      shareText: code ? `Join me on eMoney and start using USDT to INR transfers. Referral code: ${code}
+${webUrl}` : null,
+      webUrl,
+      downloadUrl: webUrl,
+      invitedCount: own.length,
+      qualifiedCount: own.filter(item => ['qualified', 'rewarded'].includes(item.status)).length,
+      completedTradeCount: stats.completedTradeCount,
+      completedVolumeUsdt: formatUsdtMicros(stats.completedVolumeUsdtMicros),
+      commissionEarnedUsdt: formatUsdtMicros(stats.commissionEarnedUsdtMicros),
+      rewardEarned: formatUsdtMicros(own.reduce((sum, referral) => sum + Number(db.digirupee.rewardLedger.find(entry => entry.id === referral.inviterRewardLedgerId)?.amountMicros || 0), 0) + stats.commissionEarnedUsdtMicros),
+      referrals: own.map(referral => referralPublic(referral))
+    });
   }
 
   if (req.method === 'GET' && path === '/admin/rewards') {
@@ -3278,7 +3433,19 @@ async function digirupeeApi(req, res, path) {
   }
 
   if (req.method === 'GET' && path === '/admin/referrals') {
-    const admin = adminAuth(req); return send(res, 200, { admin: { email: admin.email, role: admin.role }, referrals: db.digirupee.referrals.map(referralPublic), metrics: { total: db.digirupee.referrals.length, qualified: db.digirupee.referrals.filter(item => ['qualified', 'rewarded'].includes(item.status)).length, pending: db.digirupee.referrals.filter(item => item.status === 'pending').length, rewards: formatUsdtMicros(db.digirupee.referrals.reduce((sum, item) => sum + Number(db.digirupee.rewardLedger.find(entry => entry.id === item.inviterRewardLedgerId)?.amountMicros || 0), 0)) } });
+    const admin = adminAuth(req);
+    const referrals = db.digirupee.referrals.map(referral => referralPublic(referral, { includeInviter: true }));
+    const metrics = referrals.reduce((summary, referral) => {
+      summary.total += 1;
+      if (['qualified', 'rewarded'].includes(referral.status)) summary.qualified += 1;
+      if (referral.status === 'pending') summary.pending += 1;
+      summary.completedTradeCount += Number(referral.stats.completedTradeCount || 0);
+      summary.completedVolumeUsdt += Number(referral.stats.completedVolumeUsdt || 0);
+      summary.commissionEarnedUsdt += Number(referral.stats.commissionEarnedUsdt || 0);
+      return summary;
+    }, { total: 0, qualified: 0, pending: 0, completedTradeCount: 0, completedVolumeUsdt: 0, commissionEarnedUsdt: 0 });
+    const rewards = formatUsdtMicros(db.digirupee.rewardLedger.filter(entry => entry.sourceType === 'referral' || entry.sourceType === 'referral_commission').reduce((sum, entry) => sum + Number(entry.amountMicros || 0), 0));
+    return send(res, 200, { admin: { email: admin.email, role: admin.role }, referrals, metrics: { ...metrics, rewards } });
   }
 
   if (req.method === 'GET' && path === '/admin/referral-policy') {
@@ -3286,9 +3453,19 @@ async function digirupeeApi(req, res, path) {
   }
 
   if (req.method === 'PATCH' && path === '/admin/referral-policy') {
-    const admin = adminAuth(req); requireAdminRole(admin, ['owner']); const b = await body(req); const inviterRewardUsdt = validDigiAmount(b.inviterRewardUsdt ?? 0, 0, 1_000_000); const referredRewardUsdt = validDigiAmount(b.referredRewardUsdt ?? 0, 0, 1_000_000); const minimumCompletedUsdt = validDigiAmount(b.minimumCompletedUsdt ?? 0, 0, 1_000_000);
-    if ([inviterRewardUsdt, referredRewardUsdt, minimumCompletedUsdt].some(value => value === null)) return send(res, 400, { error: 'Referral policy amounts are invalid' });
-    db.digirupee.config.referrals = { enabled: b.enabled !== false, inviterRewardUsdt, referredRewardUsdt, minimumCompletedUsdt }; db.digirupee.config.updatedAt = Date.now(); appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'referral.policy.updated', entityType: 'referral-policy', entityId: 'config', details: { enabled: db.digirupee.config.referrals.enabled, inviterRewardUsdt, referredRewardUsdt, minimumCompletedUsdt } }); await persist(); return send(res, 200, { policy: referralPolicy() });
+    const admin = adminAuth(req); requireAdminRole(admin, ['owner']);
+    const b = await body(req);
+    const current = db.digirupee.config.referrals || {};
+    const inviterCommissionPercent = validDigiAmount(b.inviterCommissionPercent ?? current.inviterCommissionPercent ?? 0.5, 0, 100);
+    const inviterRewardUsdt = validDigiAmount(b.inviterRewardUsdt ?? current.inviterRewardUsdt ?? 0, 0, 1_000_000);
+    const referredRewardUsdt = validDigiAmount(b.referredRewardUsdt ?? current.referredRewardUsdt ?? 0, 0, 1_000_000);
+    const minimumCompletedUsdt = validDigiAmount(b.minimumCompletedUsdt ?? current.minimumCompletedUsdt ?? 0, 0, 1_000_000);
+    if ([inviterCommissionPercent, inviterRewardUsdt, referredRewardUsdt, minimumCompletedUsdt].some(value => value === null)) return send(res, 400, { error: 'Referral policy amounts are invalid' });
+    db.digirupee.config.referrals = { ...current, enabled: b.enabled !== false, inviterCommissionPercent, inviterRewardUsdt, referredRewardUsdt, minimumCompletedUsdt };
+    db.digirupee.config.updatedAt = Date.now();
+    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'referral.policy.updated', entityType: 'referral-policy', entityId: 'config', details: { enabled: db.digirupee.config.referrals.enabled, inviterCommissionPercent, inviterRewardUsdt, referredRewardUsdt, minimumCompletedUsdt } });
+    await persist();
+    return send(res, 200, { policy: referralPolicy() });
   }
 
   if (req.method === 'GET' && path === '/payout-methods') {
@@ -3470,10 +3647,14 @@ async function digirupeeApi(req, res, path) {
         notificationPreference: true
       }
     };
+    if (referrer && referrer.id === user.id) return send(res, 400, { error: 'You cannot refer yourself' });
+    if (referrer && db.digirupee.referrals.some(item => item.referrerUserId === referrer.id && item.referredUserId === user.id)) return send(res, 409, { error: 'Referral relation already exists' });
     db.digirupee.users.push(user);
-    if (referrer && referrer.id !== user.id) {
-      db.digirupee.referrals.push({ id: `dref_${randomUUID().replace(/-/g, '').slice(0, 12)}`, referrerUserId: referrer.id, referredUserId: user.id, createdAt: now, status: 'pending', qualifiedAt: null, qualifyingOrderId: null, inviterRewardLedgerId: null, referredRewardLedgerId: null });
-      appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'referral.created', entityType: 'referral', entityId: db.digirupee.referrals.at(-1).id, details: { referrerUserId: referrer.id } });
+    if (referrer) {
+      const referral = { id: `dref_${randomUUID().replace(/-/g, '').slice(0, 12)}`, referrerUserId: referrer.id, referredUserId: user.id, createdAt: now, status: 'pending', qualifiedAt: null, qualifyingOrderId: null, inviterRewardLedgerId: null, referredRewardLedgerId: null, commissionLedgerIds: [] };
+      db.digirupee.referrals.push(referral);
+      createDigiNotification({ userId: referrer.id, type: 'referral', title: 'New referral joined', message: `${fullName} joined eMoney using your referral.`, entityType: 'referral', entityId: referral.id, sourceKey: `referral:${referral.id}:joined` });
+      appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'referral.created', entityType: 'referral', entityId: referral.id, details: { referrerUserId: referrer.id } });
     }
     appendDigiAudit({ actorType: 'user', actorId: user.id, action: 'user.registered', entityType: 'user', entityId: user.id, details: { email } });
     await persist();
@@ -4661,6 +4842,7 @@ const server = http.createServer(async (req, res) => {
     let hostRelativePath = '';
 
     if (isDigiRupeeHost && ['/download/digirupee.apk', '/download/emoney.apk'].includes(pathname)) {
+      await recordDigiPendingReferralInstall(req, url.searchParams.get('ref'));
       const candidates = pathname.endsWith('/emoney.apk')
         ? [
             join(root, '..', 'dist', 'eMoney.apk'),

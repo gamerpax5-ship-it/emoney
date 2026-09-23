@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const configuredWebAppUrl = process.env.DIGIRUPEE_WEB_APP_URL || 'https://digirupee.loktron.com/';
+const configuredWebAppUrl = process.env.DIGIRUPEE_WEB_APP_URL || 'https://emoney-production-3e0a.up.railway.app/';
 const webAppUrl = configuredWebAppUrl.endsWith('.html') ? configuredWebAppUrl : `${configuredWebAppUrl.replace(/\/$/, '')}/digirupee-app.html`;
 const uploadedWtron = process.env.WTRON_ANDROID_HTML || '';
 const canonicalAppJs = join(root, 'ui/digirupee-app.js');
@@ -20,12 +20,6 @@ async function exists(path) {
   } catch {
     return false;
   }
-}
-
-function replaceRequired(source, pattern, replacement, label) {
-  const next = source.replace(pattern, replacement);
-  if (next === source) throw new Error(`Required production transform did not match: ${label}`);
-  return next;
 }
 
 function replaceOverlay(source, id, replacement) {
@@ -82,57 +76,20 @@ function productionHtml(source) {
 
 async function prepareDigiAdmin() {
   const path = join(root, 'website/digirupee-admin.html');
-  let html = await readFile(path, 'utf8');
-  html = html.replace('Inviter reward USDT', 'Inviter commission %');
-  html = html.replace('<input class="input" id="inviterReward" type="number" min="0" step="0.000001">', '<input class="input" id="inviterReward" type="number" min="0" max="100" step="0.01">');
-  html = html.replace(/<div class="field"><label>Referred reward USDT<\/label><input class="input" id="referredReward" type="number" min="0" step="0\.000001"><\/div>/, '');
-  html = html.replace("$('inviterReward').value = policy.inviterRewardUsdt ?? 0; $('referredReward').value = policy.referredRewardUsdt ?? 0;", "$('inviterReward').value = policy.inviterCommissionPercent ?? 1;");
-  html = html.replace("inviterRewardUsdt:Number($('inviterReward').value),referredRewardUsdt:Number($('referredReward').value),minimumCompletedUsdt:Number($('referralMinimum').value)", "inviterCommissionPercent:Number($('inviterReward').value),minimumCompletedUsdt:Number($('referralMinimum').value)");
-  await writeFile(path, html, 'utf8');
+  const html = await readFile(path, 'utf8');
+  if (!html.includes('id="inviterCommissionPercent"')) {
+    throw new Error('Admin referral commission field is missing');
+  }
 }
 
 async function compileProductionServer() {
   const sourcePath = join(root, 'website/server.mjs');
   const outputPath = join(root, 'website/server-runtime.mjs');
-  let source = await readFile(sourcePath, 'utf8');
-
-  source = replaceRequired(
-    source,
-    "referrals: { enabled: true, inviterRewardUsdt: 10, referredRewardUsdt: 0, minimumCompletedUsdt: 0 },",
-    "referrals: { enabled: true, inviterCommissionPercent: 1, minimumCompletedUsdt: 0 },",
-    'default referral percentage policy'
-  );
-
-  source = replaceRequired(
-    source,
-    /function referralPolicy\(\) \{[\s\S]*?\n\}/,
-    `function referralPolicy() {\n  const policy = db.digirupee.config.referrals || {};\n  return { enabled: policy.enabled !== false, inviterCommissionPercent: Number(policy.inviterCommissionPercent ?? 1), minimumCompletedUsdt: Number(policy.minimumCompletedUsdt || 0) };\n}`,
-    'referralPolicy'
-  );
-
-  source = replaceRequired(
-    source,
-    /  referral\.qualifyingOrderId = order\.id;\n  appendDigiAudit\(\{ actorType: 'system', actorId: 'digirupee', action: 'referral\.qualified'[\s\S]*?  referral\.status = 'rewarded';/,
-    `  referral.qualifyingOrderId = order.id;\n  appendDigiAudit({ actorType: 'system', actorId: 'digirupee', action: 'referral.qualified', entityType: 'referral', entityId: referral.id, details: { qualifyingOrderId: order.id } });\n  const inviter = db.digirupee.users.find(user => user.id === referral.referrerUserId);\n  const commissionMicros = Math.max(0, Math.floor(Number(order.usdtMicros || 0) * Number(policy.inviterCommissionPercent || 0) / 100));\n  if (inviter && commissionMicros > 0) {\n    const result = issueDigiReward({ userId: inviter.id, amountMicros: commissionMicros, type: 'referral', sourceType: 'referral', sourceId: \`${'${referral.id}'}:inviter\`, description: \`Referral commission ${'${Number(policy.inviterCommissionPercent || 0)}'}% on qualifying completed sell order\` });\n    if (result.entry) referral.inviterRewardLedgerId = result.entry.id;\n  }\n  referral.status = 'rewarded';`,
-    'percentage referral award'
-  );
-
-  source = replaceRequired(
-    source,
-    /  if \(req\.method === 'PATCH' && path === '\/admin\/referral-policy'\) \{[\s\S]*?\n  \}\n\n  if \(req\.method === 'GET' && path === '\/payout-methods'\)/,
-    `  if (req.method === 'PATCH' && path === '/admin/referral-policy') {\n    const admin = adminAuth(req); requireAdminRole(admin, ['owner']); const b = await body(req);\n    const inviterCommissionPercent = Number(b.inviterCommissionPercent ?? 1);\n    const minimumCompletedUsdt = validDigiAmount(b.minimumCompletedUsdt ?? 0, 0, 1_000_000);\n    if (!Number.isFinite(inviterCommissionPercent) || inviterCommissionPercent < 0 || inviterCommissionPercent > 100 || minimumCompletedUsdt === null) return send(res, 400, { error: 'Referral commission policy is invalid' });\n    db.digirupee.config.referrals = { enabled: b.enabled !== false, inviterCommissionPercent, minimumCompletedUsdt };\n    db.digirupee.config.updatedAt = Date.now();\n    appendDigiAudit({ actorType: 'admin', actorId: admin.email, action: 'referral.policy.updated', entityType: 'referral-policy', entityId: 'config', details: { enabled: db.digirupee.config.referrals.enabled, inviterCommissionPercent, minimumCompletedUsdt } });\n    await persist();\n    return send(res, 200, { policy: referralPolicy() });\n  }\n\n  if (req.method === 'GET' && path === '/payout-methods')`,
-    'admin referral policy endpoint'
-  );
-
-  source = replaceRequired(
-    source,
-    /  if \(req\.method === 'GET' && path === '\/referrals'\) \{[\s\S]*?\n  \}\n\n  if \(req\.method === 'GET' && path === '\/admin\/rewards'\)/,
-    `  if (req.method === 'GET' && path === '/referrals') {\n    const { user } = digirupeeAuth(req);\n    const own = db.digirupee.referrals.filter(referral => referral.referrerUserId === user.id);\n    const code = user.referralCode || null;\n    const downloadUrl = code ? \`https://digirupee.loktron.com/download/digirupee.apk?ref=${'${encodeURIComponent(code)}'}\` : null;\n    return send(res, 200, { referralCode: code, shareText: code ? \`Download digiRupee and earn with my referral code ${'${code}'}\` : null, webUrl: downloadUrl, downloadUrl, invitedCount: own.length, qualifiedCount: own.filter(item => ['qualified', 'rewarded'].includes(item.status)).length, rewardEarned: formatUsdtMicros(own.reduce((sum, referral) => sum + Number(db.digirupee.rewardLedger.find(entry => entry.id === referral.inviterRewardLedgerId)?.amountMicros || 0), 0)), referrals: own.map(referralPublic) });\n  }\n\n  if (req.method === 'GET' && path === '/admin/rewards')`,
-    'APK referral share URL'
-  );
-
+  let source = (await readFile(sourcePath, 'utf8')).replace(/\r\n/g, '\n');
+  if (!source.includes('function referralPolicy()') || !source.includes('processDigiReferralTradeCommission')) {
+    throw new Error('Canonical referral implementation is missing from production server');
+  }
   source = source.replace("'/digirupee-layout-v3.js'\n    ]);", "'/digirupee-layout-v3.js',\n      '/digirupee-enhancements.js'\n    ]);");
-
   await writeFile(outputPath, source, 'utf8');
   return outputPath;
 }

@@ -120,3 +120,6 @@ button:focus-visible,a:focus-visible{outline:2px solid #187455;outline-offset:3p
  .next-bonus-card{align-items:flex-start;flex-direction:column}.next-bonus-progress{width:100%;text-align:left}
 }
 @media(prefers-reduced-motion:reduce){.wheel-disc.is-pending{animation:none!important}}
+
+.referral-dashboard{display:grid;gap:14px}.referral-dashboard .ref-code{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid var(--line);border-radius:13px;background:var(--pale)}.referral-dashboard .ref-code small{display:block;font-size:9px;letter-spacing:.8px;color:var(--muted)}.referral-dashboard .ref-code strong{display:block;font-size:18px;letter-spacing:.6px;margin-top:4px;color:var(--green)}.referral-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.referral-metrics>div{padding:10px;border:1px solid var(--line);border-radius:11px;background:var(--panel)}.referral-metrics strong{display:block;font-size:16px;overflow-wrap:anywhere}.referral-metrics small{display:block;color:var(--muted);font-size:10px;margin-top:4px}.field-note{display:block;color:#187959;font-size:11px;margin-top:4px}
+@media(max-width:360px){.referral-dashboard .ref-code{align-items:flex-start;flex-direction:column}.referral-dashboard .ref-code .row{width:100%;justify-content:space-between}}
