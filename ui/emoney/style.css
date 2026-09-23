@@ -49,3 +49,36 @@ button:focus-visible,a:focus-visible{outline:2px solid #187455;outline-offset:3p
 .mobile-nav button{overflow:visible}.mobile-nav button .nav-icon{width:34px;height:30px;display:grid;place-items:center;border-radius:11px;overflow:visible;line-height:1}.mobile-nav button .nav-icon svg{width:20px;height:20px;overflow:visible}.mobile-nav button.active .nav-icon{background:var(--green,#075537);color:#fff;box-shadow:0 4px 12px rgb(7 85 55 / 18%)}.mobile-nav button .nav-label{display:block;line-height:1.1}.mobile-nav button.active{transform:none}
 :root[data-theme="dark"]{--bg:#0d1a15;--panel:#14251e;--pale:#19352a;--line:#2c4b3d;--text:#eef8f0;--muted:#adc5b6;--green:#8fe0b4;--gold:#f2c66d;color-scheme:dark} :root[data-theme="dark"] body,:root[data-theme="dark"] .app,:root[data-theme="dark"] .main{background:var(--bg);color:var(--text)}:root[data-theme="dark"] .topbar,:root[data-theme="dark"] .mobile-nav,:root[data-theme="dark"] .card,:root[data-theme="dark"] .setting-row,:root[data-theme="dark"] .modal,:root[data-theme="dark"] .auth-card,:root[data-theme="dark"] .auth-form-field,:root[data-theme="dark"] .control,:root[data-theme="dark"] .list-item,:root[data-theme="dark"] .payment-entry,:root[data-theme="dark"] .amount-panel,:root[data-theme="dark"] .conversion,:root[data-theme="dark"] .destination,:root[data-theme="dark"] .trade-summary,:root[data-theme="dark"] .deposit-box,:root[data-theme="dark"] .order-tile,:root[data-theme="dark"] .quick-order,:root[data-theme="dark"] .rate-card{background:var(--panel);color:var(--text);border-color:var(--line)}:root[data-theme="dark"] .rates-card,:root[data-theme="dark"] .sell-rate-card,:root[data-theme="dark"] .sell-minimum,:root[data-theme="dark"] .bank-distribution-summary,:root[data-theme="dark"] .rate-card{background:var(--pale)}:root[data-theme="dark"] input,:root[data-theme="dark"] textarea,:root[data-theme="dark"] select{color:var(--text);background:transparent}:root[data-theme="dark"] input::placeholder,:root[data-theme="dark"] textarea::placeholder{color:#8ea99a}:root[data-theme="dark"] h1,:root[data-theme="dark"] h2,:root[data-theme="dark"] h3,:root[data-theme="dark"] h4,:root[data-theme="dark"] strong,:root[data-theme="dark"] b,:root[data-theme="dark"] .rate-card strong,:root[data-theme="dark"] .sell-minimum strong,:root[data-theme="dark"] .bank-distribution-summary b{color:var(--text)}:root[data-theme="dark"] p,:root[data-theme="dark"] small,:root[data-theme="dark"] .muted,:root[data-theme="dark"] .rate-caption,:root[data-theme="dark"] .amount-limits,:root[data-theme="dark"] .setting-copy small{color:var(--muted)}:root[data-theme="dark"] .btn-ghost,:root[data-theme="dark"] .btn-secondary{background:#204536;color:#eaf8ee;border-color:#35634e}:root[data-theme="dark"] .auth,:root[data-theme="dark"] .auth-foot{background:var(--bg);color:var(--text)}:root[data-theme="dark"] .auth-field-body label,:root[data-theme="dark"] .field label{color:var(--muted)}:root[data-theme="dark"] .brand-image{mix-blend-mode:normal}:root[data-theme="dark"] .modal-backdrop{background:rgb(0 0 0 / 68%)}:root[data-theme="dark"] .sell-validation,:root[data-theme="dark"] .auth-message{color:#ff9a91}:root[data-theme="dark"] .notice{background:#243e32;color:#d9f1df;border-color:#3b6550}
 @media (max-width:520px){.rate-grid{gap:8px}.rate-card{padding:11px 9px}.rate-card strong{font-size:16px}.rate-card small{font-size:9px}.sell-rate-card strong{font-size:22px}.sell-minimum strong{font-size:16px}}
+
+
+/* Focused rates and reward visibility refinements. */
+.rates-card{display:block;padding:12px;min-height:0}
+.rates-card .rates-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px;min-width:0}
+.rates-card .rates-head strong{font-size:15px;white-space:nowrap}
+.rates-card .rates-refresh{position:static;flex:0 0 auto;font-size:10px;padding:3px}
+.rates-card .rate-grid{margin-top:0;grid-template-columns:repeat(2,minmax(0,1fr))}
+.rates-card .rate-card{min-width:0;align-items:flex-start}
+.rates-card .rate-card>div{min-width:0}
+.rates-card .rate-card strong{white-space:nowrap}
+.rates-card .rate-card small{font-size:11px;line-height:1.25;white-space:normal}
+.reward-ticker{display:flex;align-items:center;gap:9px;min-height:34px;margin:8px 1px 10px;padding:7px 0;border-top:1px solid var(--line,#dce8df);border-bottom:1px solid var(--line,#dce8df);overflow:hidden}
+.ticker-label{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--green,#075537);flex:0 0 auto}
+.ticker-viewport{min-width:0;overflow:hidden;mask-image:linear-gradient(90deg,transparent,#000 7%,#000 93%,transparent)}
+.ticker-track{display:flex;width:max-content;animation:emoney-reward-ticker 28s linear infinite;will-change:transform}
+.ticker-track span{display:block;white-space:nowrap;padding-right:42px;color:var(--text,#102b22);font-size:11px}
+@keyframes emoney-reward-ticker{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.live-campaign-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.live-campaign-grid .promo-card{height:auto;min-height:154px}
+.live-campaign-grid .promo-card small{line-height:1.35}
+.live-campaign-grid .promo-card .btn{width:100%;white-space:nowrap}
+.setting-copy b{white-space:nowrap}
+@media(max-width:390px){
+ .rates-card .rate-card{padding:10px 8px;gap:7px}
+ .rates-card .rate-card strong{font-size:16px}
+ .rates-card .rate-card small{font-size:10px}
+ .rates-card .rate-card-icon{width:27px;height:27px}
+ .live-campaign-grid{gap:7px}
+ .live-campaign-grid .promo-card{min-height:158px;padding:8px}
+ .live-campaign-grid .promo-card small{font-size:8px}
+}
+@media(prefers-reduced-motion:reduce){.ticker-track{animation:none!important;transform:none!important}}
