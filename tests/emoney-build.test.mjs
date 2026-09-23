@@ -42,9 +42,22 @@ test('mobile UI stays backend-driven and exposes the approved flows',()=>{
  assert.match(app,/Add UPI/); assert.match(app,/Add Bank Account/);
  assert.match(app,/emoney-theme/); assert.match(app,/data-theme-choice/);
  assert.match(app,/state\.campaigns\.flatMap/); assert.match(app,/data-claim/);
- assert.match(app,/total===expected/); assert.match(app,/type==='BANK'&&m\.enabled/);
+ assert.match(app,/distributedPaise===expectedPaise/); assert.match(app,/type==='BANK'&&m\.enabled/);
  assert.match(app,/data-alloc/); assert.match(app,/bank-allocations/);
  assert.ok(app.includes('class="nav-icon"'));
+});
+test('bank distribution waits for deposit detection and uses integer paise totals',async()=>{
+ const server=await readFile(join(root,'website/server.mjs'),'utf8');
+ const uiStatuses="new Set(['Detected','Confirming','USDT Confirmed','INR Processing','Late Review'])";
+ assert.match(app,/o\.payoutType==='BANK'&&o\.flexibleBankAllocation&&bankDistributionStatuses\.has\(o\.status\)/);
+ assert.match(app,/if\(!bankDistributionStatuses\.has\(o\?\.status\)\)/);
+ assert.match(app,/const toPaise=value=>Math\.round\(Number\(value\|\|0\)\*100\)/);
+ assert.match(app,/distributedPaise===expectedPaise/);
+ assert.match(server,/const digiBankDistributionStatuses = new Set\(\['Detected', 'Confirming', 'USDT Confirmed', 'INR Processing', 'Late Review'\]\)/);
+ assert.match(server,/if \(!digiBankDistributionStatuses\.has\(order\.status\)\) return send\(res, 409, \{ error: 'Bank distribution is available after the deposit is detected' \}\)/);
+ assert.match(server,/if \(plannedTotal !== Number\(order\.inrPaise\)\) return send\(res, 400, \{ error: 'Bank allocation total must equal the order INR total' \}\)/);
+ assert.match(server,/order\.allocations = next;[\s\S]*return send\(res, 200, \{ order: publicDigiOrder\(order\) \}\)/);
+ assert.ok(uiStatuses.includes('Detected'));
 });
 test('Android startup and release metadata retain eMoney identity',async()=>{
  const activity=await readFile(join(root,'android/app/src/main/java/com/loktron/tronpay/MainActivity.java'),'utf8');
