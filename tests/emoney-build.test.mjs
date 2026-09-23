@@ -23,8 +23,8 @@ test('same-origin cookie API contract and production readiness guard retained',a
  assert.match(server,/strict && !ready \? 503 : 200/);
  const gradle=await readFile(join(root,'android/app/build.gradle.kts'),'utf8');
  assert.match(gradle,/https:\/\/emoney-production-3e0a\.up\.railway\.app\//);
- assert.match(gradle,/versionCode = 11/);
- assert.match(gradle,/versionName = "1\.1\.3"/);
+ assert.match(gradle,/versionCode = 12/);
+ assert.match(gradle,/versionName = "1\.1\.4"/);
  const apkRoute=server.slice(server.indexOf("if (isDigiRupeeHost && ['/download/digirupee.apk', '/download/emoney.apk'].includes(pathname))"),server.indexOf('const legacyAdminPath'));
  const eMoneyCandidates=apkRoute.slice(apkRoute.indexOf('const candidates ='),apkRoute.indexOf('\n        : ['));
  assert.match(eMoneyCandidates,/join\(root, '\.\.', 'dist', 'eMoney\.apk'\)/);
@@ -51,9 +51,21 @@ test('home rates, reward ticker, landing rewards and customer copy stay backend-
  assert.match(app,/state\.rates\?\.rates\?\.upi/);assert.match(app,/state\.rates\?\.rates\?\.bank/);
  assert.match(app,/upiMinUsdt/);assert.match(app,/bankMinUsdt/);
  assert.match(app,/function visibleRewardTasks\(\)/);assert.match(app,/function rewardTickerMarkup\(\)/);assert.match(app,/reward-ticker/);
- assert.match(app,/visibleRewardTasks\(\)\.map/);assert.match(app,/No live rewards are available right now/);assert.doesNotMatch(app,/2 USDT bonus/);
+ assert.match(app,/visibleRewardTasks\(\)/);assert.match(app,/tasks\.map/);assert.match(app,/No rewards are available right now/);assert.doesNotMatch(app,/2 USDT bonus/);
  assert.match(app,/Add Bank Account \/ UPI/);assert.doesNotMatch(app,/settingRow\('wallet','Payout Methods'/);assert.match(app,/\/payout-methods/);
  const css=await readFile(join(root,'ui/emoney/style.css'),'utf8');assert.match(css,/\.reward-ticker/);assert.match(css,/prefers-reduced-motion/);assert.match(css,/\.rates-card \.rates-head/);
+});
+test('permanent rewards populate Rewards and Home without campaign tasks',async()=>{
+ assert.match(app,/state\.permanent/);assert.match(app,/\/rewards\/permanent/);
+ assert.match(app,/function permanentRewardCards\(\)/);assert.match(app,/joiningBonus/);assert.match(app,/thresholdUsdt/);assert.match(app,/bestCompletedDepositUsdt/);
+ assert.match(app,/permanentRewardsMarkup\(\)/);assert.match(app,/nextPermanentReward\(\)/);assert.match(app,/accountSnapshotMarkup\(\)/);
+ assert.match(app,/function rewardNewsItems\(\)/);assert.match(app,/rewardNewsItems\(\)/);assert.match(app,/state\.orders/);assert.match(app,/state\.methods/);
+ assert.match(app,/No rewards are available right now/);assert.doesNotMatch(app,/50 USDT|150 USDT|500 USDT/);
+});
+test('daily wheel renders backend segments and lands on the server result',async()=>{
+ assert.match(app,/function wheelMarkup\(\)/);assert.match(app,/state\.wheel\?\.segments/);assert.match(app,/\/wheel\/spin/);
+ assert.match(app,/result\.segmentId/);assert.match(app,/<\/svg><\/div><button id="spinBtn"/);assert.doesNotMatch(app,/<\/svg><button id="spinBtn"/);assert.match(app,/winnerIndex/);assert.match(app,/-90-winnerCenter/);assert.match(app,/state\._spinKey/);assert.match(app,/result\.rewardAmount/);assert.match(app,/state\._wheelResult=result/);assert.match(app,/previousResult/);assert.match(app,/state\.wheel\?\.canSpin/);assert.doesNotMatch(app,/Math\.random/);
+ const css=await readFile(join(root,'ui/emoney/style.css'),'utf8');assert.match(css,/\.wheel-disc/);assert.match(css,/\.wheel-pointer/);assert.match(css,/prefers-reduced-motion/);assert.match(css,/\.live-campaign-grid \.promo-card small\{font-size:11px\}/);assert.match(css,/@media\(max-width:360px\)[\s\S]*\.live-campaign-grid\{grid-template-columns:1fr\}/);
 });
 test('bank distribution waits for deposit detection and uses integer paise totals',async()=>{
  const server=await readFile(join(root,'website/server.mjs'),'utf8');
@@ -72,7 +84,7 @@ test('Android startup and release metadata retain eMoney identity',async()=>{
  const activity=await readFile(join(root,'android/app/src/main/java/com/loktron/tronpay/MainActivity.java'),'utf8');
  assert.match(activity,/createLoadingOverlay/); assert.match(activity,/Loading your secure account/); assert.match(activity,/R\.mipmap\.ic_emoney/);
  const gradle=await readFile(join(root,'android/app/build.gradle.kts'),'utf8');
- assert.match(gradle,/applicationId = "com\.loktron\.tronpay"/); assert.match(gradle,/versionCode = 11/); assert.match(gradle,/versionName = "1\.1\.3"/); assert.ok(gradle.includes('https://emoney-production-3e0a.up.railway.app/'));
+ assert.match(gradle,/applicationId = "com\.loktron\.tronpay"/); assert.match(gradle,/versionCode = 12/); assert.match(gradle,/versionName = "1\.1\.4"/); assert.ok(gradle.includes('https://emoney-production-3e0a.up.railway.app/'));
 });
 test('deferred referral APK hook targets the stable route opening',async()=>{
  const transform=await readFile(join(root,'scripts/enable-deferred-referrals.mjs'),'utf8');
