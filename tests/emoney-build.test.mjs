@@ -64,7 +64,7 @@ test('permanent rewards populate Rewards and Home without campaign tasks',async(
 });
 test('daily wheel renders backend segments and lands on the server result',async()=>{
  assert.match(app,/function wheelMarkup\(\)/);assert.match(app,/state\.wheel\?\.segments/);assert.match(app,/\/wheel\/spin/);
- assert.match(app,/result\.segmentId/);assert.match(app,/winnerIndex/);assert.match(app,/-90-winnerCenter/);assert.match(app,/state\._spinKey/);assert.match(app,/result\.rewardAmount/);assert.match(app,/state\._wheelResult=result/);assert.match(app,/previousResult/);assert.match(app,/state\.wheel\?\.canSpin/);assert.doesNotMatch(app,/Math\.random/);
+ assert.match(app,/result\.segmentId/);assert.match(app,/<\/svg><\/div><button id="spinBtn"/);assert.doesNotMatch(app,/<\/svg><button id="spinBtn"/);assert.match(app,/winnerIndex/);assert.match(app,/-90-winnerCenter/);assert.match(app,/state\._spinKey/);assert.match(app,/result\.rewardAmount/);assert.match(app,/state\._wheelResult=result/);assert.match(app,/previousResult/);assert.match(app,/state\.wheel\?\.canSpin/);assert.doesNotMatch(app,/Math\.random/);
  const css=await readFile(join(root,'ui/emoney/style.css'),'utf8');assert.match(css,/\.wheel-disc/);assert.match(css,/\.wheel-pointer/);assert.match(css,/prefers-reduced-motion/);assert.match(css,/\.live-campaign-grid \.promo-card small\{font-size:11px\}/);assert.match(css,/@media\(max-width:360px\)[\s\S]*\.live-campaign-grid\{grid-template-columns:1fr\}/);
 });
 test('bank distribution waits for deposit detection and uses integer paise totals',async()=>{
