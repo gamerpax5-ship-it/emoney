@@ -23,8 +23,8 @@ test('same-origin cookie API contract and production readiness guard retained',a
  assert.match(server,/strict && !ready \? 503 : 200/);
  const gradle=await readFile(join(root,'android/app/build.gradle.kts'),'utf8');
  assert.match(gradle,/https:\/\/emoney-production-3e0a\.up\.railway\.app\//);
- assert.match(gradle,/versionCode = 12/);
- assert.match(gradle,/versionName = "1\.1\.4"/);
+ assert.match(gradle,/versionCode = 13/);
+ assert.match(gradle,/versionName = "1\.1\.5"/);
  const apkRoute=server.slice(server.indexOf("if (isDigiRupeeHost && ['/download/digirupee.apk', '/download/emoney.apk'].includes(pathname))"),server.indexOf('const legacyAdminPath'));
  const eMoneyCandidates=apkRoute.slice(apkRoute.indexOf('const candidates ='),apkRoute.indexOf('\n        : ['));
  assert.match(eMoneyCandidates,/join\(root, '\.\.', 'dist', 'eMoney\.apk'\)/);
@@ -84,7 +84,7 @@ test('Android startup and release metadata retain eMoney identity',async()=>{
  const activity=await readFile(join(root,'android/app/src/main/java/com/loktron/tronpay/MainActivity.java'),'utf8');
  assert.match(activity,/createLoadingOverlay/); assert.match(activity,/Loading your secure account/); assert.match(activity,/R\.mipmap\.ic_emoney/);
  const gradle=await readFile(join(root,'android/app/build.gradle.kts'),'utf8');
- assert.match(gradle,/applicationId = "com\.loktron\.tronpay"/); assert.match(gradle,/versionCode = 12/); assert.match(gradle,/versionName = "1\.1\.4"/); assert.ok(gradle.includes('https://emoney-production-3e0a.up.railway.app/'));
+ assert.match(gradle,/applicationId = "com\.loktron\.tronpay"/); assert.match(gradle,/versionCode = 13/); assert.match(gradle,/versionName = "1\.1\.5"/); assert.ok(gradle.includes('https://emoney-production-3e0a.up.railway.app/'));
 });
 test('deferred referral APK hook targets the stable route opening',async()=>{
  const transform=await readFile(join(root,'scripts/enable-deferred-referrals.mjs'),'utf8');
@@ -96,6 +96,72 @@ test('deferred referral APK hook targets the stable route opening',async()=>{
  const route=server.slice(server.indexOf("if (isDigiRupeeHost && ['/download/digirupee.apk', '/download/emoney.apk'].includes(pathname))"),server.indexOf('const legacyAdminPath'));
  assert.match(route,/const candidates = pathname\.endsWith\('\/emoney\.apk'\)/);
  assert.match(route,/join\(root, '\.\.', 'dist', 'eMoney\.apk'\)/);
+});
+
+test('referral links and commission are eMoney-branded and integer-safe',async()=>{
+ const server=await readFile(join(root,'website/server.mjs'),'utf8');
+ assert.match(server,/emoneyPublicOrigin = 'https:\/\/emoney-production-3e0a\.up\.railway\.app'/);
+ assert.match(server,/Join me on eMoney and start using USDT to INR transfers/);
+ assert.doesNotMatch(server,/shareText: code \? `Join digiRupee/);
+ assert.match(server,/inviterCommissionPercent/);
+ assert.match(server,/const commissionMicrosBig = \(BigInt\(basisMicros\) \* BigInt\(commissionBps\)\) \/ 10000n/);
+ assert.match(server,/sourceType: 'referral_commission'/);assert.match(server,/sourceId: order\.id/);
+ assert.match(server,/processDigiReferralTradeCommission\(order\)/);
+ assert.match(server,/\/referrals\\\/\[A-Za-z0-9_\-\]\+\\\/trades/);
+ assert.match(server,/referrerUserId === user\.id/);
+ assert.doesNotMatch(server,/email: referred/);assert.doesNotMatch(server,/mobile: referred/);
+ const admin=await readFile(join(root,'website/digirupee-admin.html'),'utf8');
+ assert.match(admin,/id="inviterCommissionPercent"/);assert.match(admin,/inviterCommissionPercent:Number/);
+ const download=await readFile(join(root,'website/digirupee-download.html'),'utf8');
+ assert.match(download,/emoney-production-3e0a\.up\.railway\.app/);assert.doesNotMatch(download,/Official distribution[^<]*digirupee\.loktron\.com/);
+});
+test('referral commission notification is specialized and idempotent',async()=>{
+ const server=await readFile(join(root,'website/server.mjs'),'utf8');
+ assert.match(server,/idempotencyKey = null, suppressNotification = false/);
+ assert.match(server,/if \(!suppressNotification\) createDigiNotification/);
+ assert.match(server,/sourceType: 'referral_commission',[\s\S]*suppressNotification: true/);
+ assert.match(server,/if \(result\.entry && !result\.idempotent\)[\s\S]*title: 'Referral commission earned'/);
+ assert.match(server,/message: `You earned \$\{formatUsdtMicros\(result\.entry\.amountMicros\)\} USDT from a completed trade by a referred user\.`/);
+
+ const extract=(startMarker,endMarker)=>{
+  const start=server.indexOf(startMarker); const end=server.indexOf(endMarker,start);
+  assert.ok(start>=0 && end>start,`missing function source: ${startMarker}`);
+  return server.slice(start,end);
+ };
+ const context=vm.createContext({
+  db:{digirupee:{users:[{id:'referrer',profile:{fullName:'Referrer'}},{id:'referred',profile:{fullName:'Referred'}}],referrals:[{id:'ref_1',referrerUserId:'referrer',referredUserId:'referred'}],rewardLedger:[],rewards:[],notifications:[]}},
+  referralPolicy:()=>({enabled:true,inviterCommissionPercent:0.5}),
+  parseUsdtMicros:value=>Math.round(Number(value)*1_000_000),
+  formatUsdtMicros:value=>{const amount=Number(value)/1_000_000;return amount.toFixed(6).replace(/0+$/,'').replace(/\.$/,'');},
+  createDigiNotification:notification=>{context.db.digirupee.notifications.push(notification);return notification;},
+  appendDigiAudit:()=>{},
+  randomUUID:()=>`id-${context.db.digirupee.rewardLedger.length+1}`
+ });
+ vm.runInContext(extract('function issueDigiReward(', '\nfunction parseDigiDate'),context);
+ vm.runInContext(extract('function processDigiReferralTradeCommission(', '\nasync function digirupeeApi'),context);
+ const order={id:'order_1',userId:'referred',status:'Completed',usdtMicros:1_000_000_000};
+ context.order=order;
+ assert.equal(vm.runInContext('processDigiReferralTradeCommission(order)',context),true);
+ assert.equal(context.db.digirupee.rewardLedger.length,1);
+ assert.equal(context.db.digirupee.notifications.length,1);
+ assert.equal(context.db.digirupee.notifications[0].title,'Referral commission earned');
+ assert.match(context.db.digirupee.notifications[0].message,/You earned 5 USDT/);
+ assert.equal(vm.runInContext('processDigiReferralTradeCommission(order)',context),true);
+ assert.equal(context.db.digirupee.rewardLedger.length,1,'replaying the order must remain ledger-idempotent');
+ assert.equal(context.db.digirupee.notifications.length,1,'replaying the order must not create another notification');
+});
+test('referral auto-apply persists through registration and deferred claim',()=>{
+ assert.match(app,/const pendingReferralStorageKey='emoney-pending-referral'/);
+ assert.match(app,/consumeReferralMarker/);assert.match(app,/localStorage\.getItem\(pendingReferralStorageKey\)/);
+ assert.match(app,/api\('\/referral-install\/claim',\{allow401:true\}\)/);
+ assert.match(app,/localStorage\.setItem\(pendingReferralStorageKey,code\)/);
+ assert.match(app,/localStorage\.removeItem\(pendingReferralStorageKey\)/);
+ assert.match(app,/Referral applied/);assert.match(app,/readOnly=true/);
+});
+test('referral dashboard exposes safe aggregate and owned trade history',()=>{
+ assert.match(app,/Completed Trades/);assert.match(app,/Commission Earned/);assert.match(app,/data-referral-detail/);assert.match(app,/\/referrals\/\$\{encodeURIComponent\(id\)\}\/trades\?limit=100/);
+ const serverText=readFile(join(root,'website/server.mjs'),'utf8');
+ return serverText.then(server=>{assert.match(server,/referralId = path\.split\('\/'\)\[2\]/);assert.match(server,/referrerUserId === user\.id/);assert.match(server,/commissionEarnedUsdt/);assert.match(server,/completedVolumeUsdt/);});
 });
 test('all approved artwork bytes have matching SHA-256',async()=>{
  const hashes=JSON.parse(await readFile(join(source,'asset-sha256.json'),'utf8'));assert.equal(Object.keys(hashes).length,14);

@@ -15,6 +15,7 @@ const dt = v => v ? new Date(v).toLocaleString('en-IN',{day:'2-digit',month:'sho
 const activeStatuses = ['Awaiting Deposit','Detected','Confirming','USDT Confirmed','INR Processing','Late Review'];
 const bankDistributionStatuses = new Set(['Detected','Confirming','USDT Confirmed','INR Processing','Late Review']);
 const icon = name => ico(name);
+const pendingReferralStorageKey='emoney-pending-referral';
 const state = {mode:'live',authMode:'login',challengeId:null,user:null,profile:null,rates:null,methods:[],orders:[],rewards:{balance:0,lifetimeEarned:0,ledger:[]},campaigns:[],wheel:null,referrals:null,tickets:[],notifications:[],unreadCount:0,twoFactor:null,sessions:[],page:'overview',_wheelAngle:0,_wheelResult:null,sellType:'UPI',selectedMethodId:null,quote:null,orderFilter:'All',refresh:null};
 
 function toast(message,error=false){const t=$('#toast');t.textContent=message;t.className='toast show'+(error?' error':'');clearTimeout(t._t);t._t=setTimeout(()=>t.className='toast',2600)}
@@ -75,7 +76,7 @@ async function authenticate(result) {
   state.user=result.user; state.profile=result.profile||null; state.page='overview';
   $('#password').value=''; $('#twoFactorCode').value=''; state.challengeId=null;
   $('#alternateAuth').hidden=false; $('#newAccountLabel').hidden=false;
-  try { sessionStorage.removeItem('emoney-pending-referral'); } catch {}
+  try { localStorage.removeItem(pendingReferralStorageKey); } catch {}
   enterApp();
   if(state.profile?.notificationPreference!==false)window.DigiAndroid?.requestNotificationPermission?.();
   await refreshAll(false);
@@ -344,8 +345,8 @@ function checkTransactionForm(o){modal('Check your deposit','Enter the TRON tran
 
 function rewardRows(limit=Infinity){const entries=state.rewards?.ledger||state.rewards?.recent||[];return entries.slice(0,limit).map(x=>`<div class="history-row"><div><b>${esc(x.description||x.sourceType||'Reward')}</b><small>${dt(x.createdAt)}</small></div><strong>${x.direction==='debit'?'−':'+'}${num(x.amount)} USDT</strong></div>`).join('')||empty('Your reward activity will appear here.')}
 function openRewardHistory(){modal('Your reward ledger','Every credit and debit, in one place.',rewardRows())}
-function openReferrals(){const ref=state.referrals||{};modal('Referral activity','Keep track of your invites.',`<div class="ref-code"><span>${esc(ref.referralCode||'Not assigned')}</span><button class="btn-text" data-copy="${esc(ref.webUrl||ref.referralCode||'')}">${ico('copy')}Copy link</button></div><div class="list" style="margin-top:18px">${(ref.referrals||[]).map(x=>`<div class="list-item"><b>${esc(x.referred?.name||x.referred?.id||'Referred account')}</b><small>${esc(x.status)} · ${dt(x.createdAt)} · ${num(x.inviterReward||0)} USDT earned</small></div>`).join('')||empty('No referral activity to display.')}</div>`);bindActions()}
-
+function openReferrals(){const ref=state.referrals||{},rows=ref.referrals||[];modal('Refer & Earn','Invite friends and track your referral earnings.',`<div class="referral-dashboard"><div class="ref-code"><div><small>YOUR REFERRAL CODE</small><strong>${esc(ref.referralCode||'Not assigned')}</strong></div><div class="row"><button class="btn-text" data-copy="${esc(ref.webUrl||'')}">${ico('copy')}Copy link</button><button class="btn-text" data-action="share-referral">${uiIcon('share')}Share</button></div></div><div class="metrics referral-metrics"><div><strong>${Number(ref.invitedCount||0)}</strong><small>Users</small></div><div><strong>${Number(ref.completedTradeCount||0)}</strong><small>Completed Trades</small></div><div><strong>${num(ref.completedVolumeUsdt||0)} USDT</strong><small>Referral Volume</small></div><div><strong>${num(ref.commissionEarnedUsdt||0)} USDT</strong><small>Commission Earned</small></div></div></div><h4 style="margin:20px 0 10px">Your Referrals</h4><div class="list">${rows.map(x=>`<button class="list-item" data-referral-detail="${esc(x.id)}" data-referral-name="${esc(x.referred?.name||'Referred account')}" style="text-align:left"><b>${esc(x.referred?.name||'Referred account')}</b><small>${esc(x.status||'pending')} - Joined ${dt(x.createdAt)}</small><small>${Number(x.stats?.completedTradeCount||0)} trades - ${num(x.stats?.completedVolumeUsdt||0)} USDT volume - ${num(x.stats?.commissionEarnedUsdt||0)} USDT earned</small></button>`).join('')||empty('No referral activity to display.')}</div>`);bindActions();$$('[data-referral-detail]').forEach(button=>button.onclick=()=>openReferralDetails(button.dataset.referralDetail,button.dataset.referralName));}
+async function openReferralDetails(id,name){try{const result=await api(`/referrals/${encodeURIComponent(id)}/trades?limit=100`);const trades=result.trades||[];modal('Referral details','Safe completed-trade summaries.',`<div class="list"><div class="list-item"><b>${esc(name||'Referred account')}</b><small>${trades.length} completed trade${trades.length===1?'':'s'}</small></div>${trades.map(trade=>`<div class="list-item"><b>${esc(trade.orderId)} - ${num(trade.usdtAmount)} USDT</b><small>${esc(trade.status)} - ${num(trade.commissionUsdt)} USDT commission - ${dt(trade.completedAt||trade.createdAt)}</small></div>`).join('')||empty('No completed trades yet.')}</div>`);}catch(error){toast(error.message,true)}}
 
 function openSearch(){
  modal('Find your way.','Search pages, order IDs, statuses or receiving accounts.',`<label class="order-search">${ico('search')}<input id="globalSearch" style="width:100%" placeholder="Try bank or an order ID" aria-label="Search pages and transactions"></label><div id="searchResults" class="search-results"></div>`);
@@ -532,7 +533,7 @@ function renderRewards(){
  const ref=state.referrals||{},tasks=visibleRewardTasks(),permanent=permanentRewardCards();
  $('#page-rewards').innerHTML=`<div class="reward-intro">${art('rewardsHero','','eMoney Rewards. Make Life Better. Stylish adult brand ambassador holding a gift.')}<button class="art-hotspot art-bell" data-action="notifications" aria-label="Notifications"></button><button class="art-hotspot art-profile" data-action="account" aria-label="Your profile"></button><button class="art-hotspot art-brand" data-jump="overview" aria-label="eMoney home"></button></div>
  <div class="dark-card rewards-balance"><button class="reward-cash-link" data-action="reward-history"><span class="balance-title">${uiIcon('gift')}Your Rewards Balance</span><div class="reward-num">${num(state.rewards?.balance)} <small>USDT</small></div><div class="reward-caption">Keep earning. More rewards await!</div></button><div class="reward-art">${art('rewardGift','','Green gift and gold coins')}</div></div>
- <div class="card referral-summary"><span class="referral-bubble">${uiIcon('group')}</span><div><h3>Referral Earnings</h3><strong>${num(ref.rewardEarned)} <small>USDT</small></strong><p>${Number(ref.qualifiedCount||0)} qualified - ${Number(ref.invitedCount||0)} invited</p></div><button class="btn btn-secondary btn-sm" data-action="referrals">View Details</button>${art('referralArt','','More friends, bigger rewards')}</div>
+ <div class="card referral-summary"><span class="referral-bubble">${uiIcon('group')}</span><div><h3>Referral Earnings</h3><strong>${num(ref.commissionEarnedUsdt ?? ref.rewardEarned)} <small>USDT</small></strong><p>${Number(ref.invitedCount||0)} invited - ${Number(ref.completedTradeCount||0)} completed trades</p></div><button class="btn btn-secondary btn-sm" data-action="referrals">View Details</button>${art('referralArt','','More friends, bigger rewards')}</div>
  ${permanentRewardsMarkup()}
  ${tasks.length?`<div class="section-head campaign-title"><h3>Live reward campaigns</h3><button class="btn-text" data-action="campaigns">View All ${uiIcon('chevron')}</button></div><div class="campaign-grid live-campaign-grid">${tasks.map(t=>{const claim=t.claim,eligible=canClaimTask(t);return `<article class="promo-card ${eligible?'green':''}"><div class="campaign-kicker">${esc(t.campaignTitle||'Campaign')}</div><h4>${esc(t.title||'Reward task')}</h4><strong>${num(t.rewardAmount)} USDT</strong><small>${esc(t.description||'Complete the eligible task to earn this reward.')}</small><span class="reward-status">${claim?esc(claim.status==='credited'?'Claimed':claim.status):eligible?'Ready to claim':'In progress'}</span><button class="btn btn-secondary btn-sm" data-claim="${esc(t.id)}" data-campaign="${esc(t.campaignId)}" ${eligible?'':'disabled'}>${claim?esc(claim.status==='credited'?'Claimed':claim.status):eligible?(String(t.claimType).toUpperCase()==='MANUAL'?'Submit Claim':'Claim Reward'):'In Progress'}</button></article>`;}).join('')}</div>`:''}
  ${!permanent.length&&!tasks.length?empty('No rewards are available right now.'):''}
@@ -598,7 +599,7 @@ $('#authForm').onsubmit=async e=>{
  e.preventDefault();$('#authMessage').textContent='';const btn=e.submitter;btn.disabled=true;
  try{const email=$('#email').value.trim().toLowerCase(),password=$('#password').value;
  if(state.authMode==='register'){
-  {await api('/auth/register',{method:'POST',allow401:true,body:JSON.stringify({fullName:$('#fullName').value.trim(),mobile:$('#mobile').value.trim(),email,password,referralCode:$('#referral').value.trim()})});toast('Account created. Sign in to continue.')}
+  {await api('/auth/register',{method:'POST',allow401:true,body:JSON.stringify({fullName:$('#fullName').value.trim(),mobile:$('#mobile').value.trim(),email,password,referralCode:$('#referral').value.trim()})});try{localStorage.removeItem(pendingReferralStorageKey)}catch{};toast('Account created. Sign in to continue.')}
   switchAuth('login');$('#email').value=email;$('#password').value='';return;
  }
  let result;result=await api('/auth/login',{method:'POST',allow401:true,body:JSON.stringify({email,password})});
@@ -660,12 +661,13 @@ function surfaceNativeNotifications() {
   }
 }
 
-function captureReferral() {
+async function captureReferral() {
   const normalize=value=>{const code=String(value||'').trim().toUpperCase();return /^DGR[A-F0-9]{10}$/.test(code)?code:'';};
   let code=normalize(new URLSearchParams(location.search).get('ref'));
   try{code=code||normalize(window.DigiAndroid?.consumeReferralMarker?.());}catch{}
-  try{code=code||normalize(sessionStorage.getItem('emoney-pending-referral'));if(code)sessionStorage.setItem('emoney-pending-referral',code);}catch{}
-  if(code){$('#referral').value=code;$('#referral').readOnly=true;switchAuth('register');}
+  try{const stored=localStorage.getItem(pendingReferralStorageKey);if(stored){const storedCode=normalize(stored);if(storedCode)code=code||storedCode;else localStorage.removeItem(pendingReferralStorageKey);}}catch{}
+  if(!code){try{const result=await api('/referral-install/claim',{allow401:true});const claimed=String(result.referralCode||'');code=normalize(claimed);if(claimed&&!code)try{localStorage.removeItem(pendingReferralStorageKey)}catch{}}catch{}}
+  if(code){try{localStorage.setItem(pendingReferralStorageKey,code);}catch{};const input=$('#referral');if(input){input.value=code;input.readOnly=true;input.setAttribute('aria-describedby','referralApplied');}const field=$('#refField');if(field){field.classList.remove('hidden');let note=$('#referralApplied');if(!note){note=document.createElement('small');note.id='referralApplied';note.className='field-note';field.append(note);}note.textContent='Referral applied';}switchAuth('register');}
 }
 
 async function boot() {
@@ -674,10 +676,10 @@ async function boot() {
   try {
     const result=await api('/me',{allow401:true});
     if(result.user)await authenticate(result);
-    else{showAuth('');captureReferral();}
+    else{showAuth('');await captureReferral();}
   } catch(error) {
-    if(error.status===401){showAuth('');captureReferral();}
-    else{showAuth(error.message);captureReferral();}
+    if(error.status===401){showAuth('');await captureReferral();}
+    else{showAuth(error.message);await captureReferral();}
   } finally{button.disabled=false;}
 }
 window.__digiHandleBack = window.__emoneyBack;
