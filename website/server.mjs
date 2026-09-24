@@ -2696,7 +2696,7 @@ function digiRewardMetrics() {
   };
 }
 
-function issueDigiReward({ userId, amountMicros, type, sourceType, sourceId, description, idempotencyKey = null }) {
+function issueDigiReward({ userId, amountMicros, type, sourceType, sourceId, description, idempotencyKey = null, suppressNotification = false }) {
   const amount = Number(amountMicros);
   if (!Number.isSafeInteger(amount) || amount < 0) return { error: 'Reward amount is invalid' };
   const existing = db.digirupee.rewardLedger.find(entry => entry.userId === userId && entry.sourceType === sourceType && entry.sourceId === sourceId && entry.status === 'posted');
@@ -2710,7 +2710,7 @@ function issueDigiReward({ userId, amountMicros, type, sourceType, sourceId, des
   db.digirupee.rewardLedger.push(entry);
   db.digirupee.rewards.push({ id: `drw_${randomUUID().replace(/-/g, '').slice(0, 12)}`, userId, ledgerId: entry.id, sourceType, sourceId, amountMicros: amount, direction: 'credit', status: 'posted', createdAt: now });
   appendDigiAudit({ actorType: 'system', actorId: 'digirupee', action: 'reward.issued', entityType: 'reward', entityId: entry.id, details: { userId, sourceType, sourceId, amount: formatUsdtMicros(amount) } });
-  createDigiNotification({ userId, type: sourceType === 'referral' ? 'referral' : sourceType === 'campaign' || sourceType === 'task' ? 'campaign' : 'reward', title: 'Reward credited', message: `${formatUsdtMicros(amount)} USDT reward credited.`, entityType: 'reward', entityId: entry.id, sourceKey: `reward:${entry.id}` });
+  if (!suppressNotification) createDigiNotification({ userId, type: sourceType === 'referral' ? 'referral' : sourceType === 'campaign' || sourceType === 'task' ? 'campaign' : 'reward', title: 'Reward credited', message: `${formatUsdtMicros(amount)} USDT reward credited.`, entityType: 'reward', entityId: entry.id, sourceKey: `reward:${entry.id}` });
   return { entry, idempotent: false };
 }
 
@@ -2920,7 +2920,8 @@ function processDigiReferralTradeCommission(order) {
     type: 'referral_commission',
     sourceType: 'referral_commission',
     sourceId: order.id,
-    description: 'Referral commission from completed trade'
+    description: 'Referral commission from completed trade',
+    suppressNotification: true
   });
   if (result.entry && !result.idempotent) {
     referral.commissionLedgerIds = Array.isArray(referral.commissionLedgerIds) ? referral.commissionLedgerIds : [];

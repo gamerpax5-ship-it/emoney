@@ -115,6 +115,41 @@ test('referral links and commission are eMoney-branded and integer-safe',async()
  const download=await readFile(join(root,'website/digirupee-download.html'),'utf8');
  assert.match(download,/emoney-production-3e0a\.up\.railway\.app/);assert.doesNotMatch(download,/Official distribution[^<]*digirupee\.loktron\.com/);
 });
+test('referral commission notification is specialized and idempotent',async()=>{
+ const server=await readFile(join(root,'website/server.mjs'),'utf8');
+ assert.match(server,/idempotencyKey = null, suppressNotification = false/);
+ assert.match(server,/if \(!suppressNotification\) createDigiNotification/);
+ assert.match(server,/sourceType: 'referral_commission',[\s\S]*suppressNotification: true/);
+ assert.match(server,/if \(result\.entry && !result\.idempotent\)[\s\S]*title: 'Referral commission earned'/);
+ assert.match(server,/message: `You earned \$\{formatUsdtMicros\(result\.entry\.amountMicros\)\} USDT from a completed trade by a referred user\.`/);
+
+ const extract=(startMarker,endMarker)=>{
+  const start=server.indexOf(startMarker); const end=server.indexOf(endMarker,start);
+  assert.ok(start>=0 && end>start,`missing function source: ${startMarker}`);
+  return server.slice(start,end);
+ };
+ const context=vm.createContext({
+  db:{digirupee:{users:[{id:'referrer',profile:{fullName:'Referrer'}},{id:'referred',profile:{fullName:'Referred'}}],referrals:[{id:'ref_1',referrerUserId:'referrer',referredUserId:'referred'}],rewardLedger:[],rewards:[],notifications:[]}},
+  referralPolicy:()=>({enabled:true,inviterCommissionPercent:0.5}),
+  parseUsdtMicros:value=>Math.round(Number(value)*1_000_000),
+  formatUsdtMicros:value=>{const amount=Number(value)/1_000_000;return amount.toFixed(6).replace(/0+$/,'').replace(/\.$/,'');},
+  createDigiNotification:notification=>{context.db.digirupee.notifications.push(notification);return notification;},
+  appendDigiAudit:()=>{},
+  randomUUID:()=>`id-${context.db.digirupee.rewardLedger.length+1}`
+ });
+ vm.runInContext(extract('function issueDigiReward(', '\nfunction parseDigiDate'),context);
+ vm.runInContext(extract('function processDigiReferralTradeCommission(', '\nasync function digirupeeApi'),context);
+ const order={id:'order_1',userId:'referred',status:'Completed',usdtMicros:1_000_000_000};
+ context.order=order;
+ assert.equal(vm.runInContext('processDigiReferralTradeCommission(order)',context),true);
+ assert.equal(context.db.digirupee.rewardLedger.length,1);
+ assert.equal(context.db.digirupee.notifications.length,1);
+ assert.equal(context.db.digirupee.notifications[0].title,'Referral commission earned');
+ assert.match(context.db.digirupee.notifications[0].message,/You earned 5 USDT/);
+ assert.equal(vm.runInContext('processDigiReferralTradeCommission(order)',context),true);
+ assert.equal(context.db.digirupee.rewardLedger.length,1,'replaying the order must remain ledger-idempotent');
+ assert.equal(context.db.digirupee.notifications.length,1,'replaying the order must not create another notification');
+});
 test('referral auto-apply persists through registration and deferred claim',()=>{
  assert.match(app,/const pendingReferralStorageKey='emoney-pending-referral'/);
  assert.match(app,/consumeReferralMarker/);assert.match(app,/localStorage\.getItem\(pendingReferralStorageKey\)/);
